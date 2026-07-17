@@ -1,0 +1,425 @@
+/**
+ * 灵犀 — 认证与计费前端模块
+ *
+ * 提供：
+ * - 登录/登出管理
+ * - Token 持久化（localStorage）
+ * - 自动为 fetch 请求添加 Authorization header
+ * - 余额查询与显示
+ * - 计费扣款触发
+ *
+ * 使用：在 HTML 中引入本文件后，通过 window.AuthManager 访问
+ */
+(function () {
+  "use strict";
+
+  // --- 常量 ---
+  var TOKEN_KEY = "lingxi_token";
+  var USER_KEY = "lingxi_user";
+  var AUTH_OVERLAY_ID = "auth-overlay";
+  var BALANCE_BAR_ID = "balance-bar";
+  var BALANCE_AMOUNT_ID = "balance-amount";
+  var LOGIN_FORM_ID = "login-form";
+  var LOGIN_USERNAME_ID = "login-username";
+  var LOGIN_PASSWORD_ID = "login-password";
+  var LOGIN_ERROR_ID = "login-error";
+  var LOGIN_SUBMIT_ID = "login-submit";
+  var LOGOUT_BTN_ID = "logout-btn";
+
+  // --- 获取 API base ---
+  function getApiBase() {
+    if (window.API_CONFIG && window.API_CONFIG.apiBase) {
+      return window.API_CONFIG.apiBase.replace(/\/$/, "");
+    }
+    return "";
+  }
+
+  // --- 获取旧 token（备用） ---
+  function getLegacyToken() {
+    if (window.API_CONFIG && window.API_CONFIG.token) {
+      return window.API_CONFIG.token;
+    }
+    return null;
+  }
+
+  // --- Token 管理 ---
+  function getToken() {
+    try {
+      return localStorage.getItem(TOKEN_KEY) || null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function setToken(token) {
+    try {
+      localStorage.setItem(TOKEN_KEY, token);
+    } catch (e) {
+      console.warn("[Auth] 无法写入 localStorage", e);
+    }
+  }
+
+  function clearToken() {
+    try {
+      localStorage.removeItem(TOKEN_KEY);
+      localStorage.removeItem(USER_KEY);
+    } catch (e) {
+      // 忽略
+    }
+  }
+
+  // --- 用户信息 ---
+  function getUser() {
+    try {
+      var raw = localStorage.getItem(USER_KEY);
+      return raw ? JSON.parse(raw) : null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function setUser(user) {
+    try {
+      localStorage.setItem(USER_KEY, JSON.stringify(user));
+    } catch (e) {
+      // 忽略
+    }
+  }
+
+  // --- 检查登录状态 ---
+  function isLoggedIn() {
+    var token = getToken();
+    if (!token) return false;
+    var user = getUser();
+    if (!user || !user.expires_at) return false;
+    // 检查是否过期
+    var now = Math.floor(Date.now() / 1000);
+    if (user.expires_at < now) {
+      clearToken();
+      return false;
+    }
+    return true;
+  }
+
+  // --- Toast 提示 ---
+  function showToast(message, type) {
+    var existing = document.getElementById("auth-toast");
+    if (existing) existing.remove();
+
+    var toast = document.createElement("div");
+    toast.id = "auth-toast";
+    toast.className = "auth-toast " + (type || "");
+    toast.textContent = message;
+    document.body.appendChild(toast);
+
+    // 触发动画
+    setTimeout(function () {
+      toast.classList.add("show");
+    }, 10);
+
+    // 自动消失
+    setTimeout(function () {
+      toast.classList.remove("show");
+      setTimeout(function () {
+        if (toast.parentNode) toast.remove();
+      }, 300);
+    }, 2500);
+  }
+
+  // --- 显示/隐藏登录遮罩 ---
+  function showLoginOverlay() {
+    var overlay = document.getElementById(AUTH_OVERLAY_ID);
+    if (overlay) {
+      overlay.hidden = false;
+    }
+    var balanceBar = document.getElementById(BALANCE_BAR_ID);
+    if (balanceBar) {
+      balanceBar.hidden = true;
+    }
+  }
+
+  function hideLoginOverlay() {
+    var overlay = document.getElementById(AUTH_OVERLAY_ID);
+    if (overlay) {
+      overlay.hidden = true;
+    }
+    var balanceBar = document.getElementById(BALANCE_BAR_ID);
+    if (balanceBar) {
+      balanceBar.hidden = false;
+    }
+  }
+
+  // --- 更新余额显示 ---
+  function updateBalanceDisplay(balance) {
+    var el = document.getElementById(BALANCE_AMOUNT_ID);
+    if (!el) return;
+
+    var formatted = parseFloat(balance || 0).toFixed(2);
+    el.textContent = "¥" + formatted;
+
+    // 余额状态着色
+    el.classList.remove("low", "critical");
+    if (balance < 20) {
+      el.classList.add("critical");
+    } else if (balance < 50) {
+      el.classList.add("low");
+    }
+
+    // 同步更新 localStorage 中的余额
+    var user = getUser();
+    if (user) {
+      user.balance = parseFloat(balance);
+      setUser(user);
+    }
+  }
+
+  // --- 登录 ---
+  async function login(username, password) {
+    var apiBase = getApiBase();
+    var url = apiBase + "/api/auth/login";
+
+    try {
+      var resp = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username: username, password: password }),
+      });
+
+      var data = await resp.json();
+
+      if (data.ok && data.token) {
+        setToken(data.token);
+        setUser({
+          username: data.username,
+          expires_at: data.expires_at,
+          balance: data.balance,
+        });
+        updateBalanceDisplay(data.balance);
+        hideLoginOverlay();
+        showToast("登录成功", "success");
+
+        // 触发状态变化回调
+        _notifyAuthStateChange(true, data.username);
+        return true;
+      } else {
+        showLoginError(data.error || "登录失败");
+        return false;
+      }
+    } catch (e) {
+      showLoginError("网络错误，请检查连接");
+      console.error("[Auth] 登录失败", e);
+      return false;
+    }
+  }
+
+  // --- 登出 ---
+  async function logout() {
+    var token = getToken();
+    if (token) {
+      var apiBase = getApiBase();
+      try {
+        await fetch(apiBase + "/api/auth/logout", {
+          method: "POST",
+          headers: { Authorization: "Bearer " + token },
+        });
+      } catch (e) {
+        // 忽略网络错误
+      }
+    }
+    clearToken();
+    showLoginOverlay();
+    showToast("已退出登录", "");
+
+    _notifyAuthStateChange(false, null);
+  }
+
+  // --- 显示登录错误 ---
+  function showLoginError(msg) {
+    var el = document.getElementById(LOGIN_ERROR_ID);
+    if (el) {
+      el.textContent = msg;
+      el.classList.add("show");
+      setTimeout(function () {
+        el.classList.remove("show");
+      }, 3000);
+    }
+  }
+
+  // --- 设置按钮加载状态 ---
+  function setButtonLoading(loading) {
+    var btn = document.getElementById(LOGIN_SUBMIT_ID);
+    if (!btn) return;
+    btn.disabled = loading;
+    var textEl = btn.querySelector(".auth-button-text");
+    var spinnerEl = btn.querySelector(".auth-button-spinner");
+    if (textEl) textEl.hidden = loading;
+    if (spinnerEl) spinnerEl.hidden = !loading;
+  }
+
+  // --- 获取计费摘要 ---
+  async function getBillingSummary() {
+    var token = getToken();
+    if (!token) return null;
+
+    var apiBase = getApiBase();
+    try {
+      var resp = await fetch(apiBase + "/api/billing/summary", {
+        headers: { Authorization: "Bearer " + token },
+      });
+      if (resp.status === 401) {
+        // Token 失效
+        clearToken();
+        showLoginOverlay();
+        return null;
+      }
+      var data = await resp.json();
+      if (data.ok) {
+        updateBalanceDisplay(data.balance);
+      }
+      return data;
+    } catch (e) {
+      console.error("[Auth] 查询计费摘要失败", e);
+      return null;
+    }
+  }
+
+  // --- 执行计费扣款 ---
+  async function chargeBilling() {
+    var token = getToken();
+    if (!token) return null;
+
+    var apiBase = getApiBase();
+    try {
+      var resp = await fetch(apiBase + "/api/billing/charge", {
+        method: "POST",
+        headers: { Authorization: "Bearer " + token },
+      });
+      if (resp.status === 401) {
+        clearToken();
+        showLoginOverlay();
+        return null;
+      }
+      var data = await resp.json();
+      if (data.ok) {
+        updateBalanceDisplay(data.new_balance);
+      }
+      return data;
+    } catch (e) {
+      console.error("[Auth] 计费扣款失败", e);
+      return null;
+    }
+  }
+
+  // --- 封装 fetch：自动添加 Authorization ---
+  function fetchWithAuth(url, options) {
+    options = options || {};
+    options.headers = options.headers || {};
+
+    var token = getToken();
+    if (token) {
+      options.headers["Authorization"] = "Bearer " + token;
+    } else {
+      // 降级：使用旧 API_TOKEN
+      var legacy = getLegacyToken();
+      if (legacy) {
+        options.headers["Authorization"] = "Bearer " + legacy;
+      }
+    }
+
+    return fetch(url, options).then(function (resp) {
+      // Token 过期
+      if (resp.status === 401 && token) {
+        clearToken();
+        showLoginOverlay();
+        showToast("登录已过期，请重新登录", "error");
+      }
+      return resp;
+    });
+  }
+
+  // --- 认证状态变化回调 ---
+  var _callbacks = [];
+
+  function onAuthStateChanged(callback) {
+    _callbacks.push(callback);
+  }
+
+  function _notifyAuthStateChange(loggedIn, username) {
+    _callbacks.forEach(function (cb) {
+      try {
+        cb(loggedIn, username);
+      } catch (e) {
+        console.error("[Auth] 状态变化回调异常", e);
+      }
+    });
+  }
+
+  // --- 初始化 ---
+  function init() {
+    var form = document.getElementById(LOGIN_FORM_ID);
+    if (form) {
+      form.addEventListener("submit", async function (e) {
+        e.preventDefault();
+        var usernameEl = document.getElementById(LOGIN_USERNAME_ID);
+        var passwordEl = document.getElementById(LOGIN_PASSWORD_ID);
+        if (!usernameEl || !passwordEl) return;
+
+        var username = usernameEl.value.trim();
+        var password = passwordEl.value;
+
+        if (!username || !password) {
+          showLoginError("请输入账号和密码");
+          return;
+        }
+
+        setButtonLoading(true);
+        await login(username, password);
+        setButtonLoading(false);
+      });
+    }
+
+    var logoutBtn = document.getElementById(LOGOUT_BTN_ID);
+    if (logoutBtn) {
+      logoutBtn.addEventListener("click", function () {
+        logout();
+      });
+    }
+
+    // 检查登录状态
+    if (isLoggedIn()) {
+      hideLoginOverlay();
+      var user = getUser();
+      if (user && user.balance !== undefined) {
+        updateBalanceDisplay(user.balance);
+      }
+      // 异步刷新余额
+      getBillingSummary();
+    } else {
+      showLoginOverlay();
+    }
+  }
+
+  // --- DOM 就绪后初始化 ---
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", init);
+  } else {
+    init();
+  }
+
+  // --- 暴露全局接口 ---
+  window.AuthManager = {
+    login: login,
+    logout: logout,
+    isLoggedIn: isLoggedIn,
+    getToken: getToken,
+    getUser: getUser,
+    fetchWithAuth: fetchWithAuth,
+    getBillingSummary: getBillingSummary,
+    chargeBilling: chargeBilling,
+    updateBalanceDisplay: updateBalanceDisplay,
+    onAuthStateChanged: onAuthStateChanged,
+    showLoginOverlay: showLoginOverlay,
+    hideLoginOverlay: hideLoginOverlay,
+    showToast: showToast,
+  };
+})();

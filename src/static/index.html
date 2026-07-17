@@ -10,6 +10,7 @@
   <!-- 注意：全部使用相对路径，兼容 Web 部署（/static/ 挂载）与 Tauri/Capacitor 打包（webview 根目录） -->
   <link rel="icon" type="image/svg+xml" href="favicon.svg">
   <link rel="stylesheet" href="css/style.css?v=20260717u2">
+  <link rel="stylesheet" href="css/auth.css?v=20260718a1">
   <!-- Vue 3（本地 vendor） -->
   <script src="vendor/vue.global.prod.js"></script>
   <!-- Konva (Canvas 交互，本地 vendor) -->
@@ -19,6 +20,36 @@
   <script src="vendor/pannellum.js"></script>
 </head>
 <body>
+  <!-- 登录遮罩 -->
+  <div id="auth-overlay" class="auth-overlay">
+    <div class="auth-card">
+      <div class="auth-header">
+        <h1 class="auth-title">灵犀</h1>
+        <p class="auth-subtitle">请登录以继续</p>
+      </div>
+      <form id="login-form" class="auth-form">
+        <div class="auth-field">
+          <input type="text" id="login-username" placeholder="账号" autocomplete="username" required>
+        </div>
+        <div class="auth-field">
+          <input type="password" id="login-password" placeholder="密码" autocomplete="current-password" required>
+        </div>
+        <div id="login-error" class="auth-error"></div>
+        <button type="submit" id="login-submit" class="auth-button">
+          <span class="auth-button-text">登录</span>
+          <span class="auth-button-spinner" hidden></span>
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <!-- 余额显示条 -->
+  <div id="balance-bar" class="balance-bar" hidden>
+    <span class="balance-label">余额</span>
+    <span class="balance-amount" id="balance-amount">¥0.00</span>
+    <button id="logout-btn" class="logout-btn" title="退出登录">退出</button>
+  </div>
+
   <div id="app">
     <!-- 首页 -->
     <div v-if="route === 'home'" class="page-home" :class="{ 'desktop-mode': isDesktop }" :style="{ marginLeft: isDesktop ? '56px' : '0' }">
@@ -148,10 +179,11 @@
     <panorama-view v-if="route === 'panorama'" :is-desktop="isDesktop" @back="navigate('home')" @navigate="navigate"></panorama-view>
   </div>
 
-  <!-- JS: 先加载组件定义，再加载主应用 -->
+  <!-- JS: 先加载认证模块，再加载组件定义，最后加载主应用 -->
+  <script src="js/auth.js?v=20260718a1"></script>
   <script src="js/chat.js?v=20260717v4"></script>
   <script src="js/image-edit.js?v=20260717v4"></script>
   <script src="js/panorama.js?v=20260717v4"></script>
-  <script src="js/app.js?v=20260717v4"></script>
+  <script src="js/app.js?v=20260718a1"></script>
 </body>
 </html>
