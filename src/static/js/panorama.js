@@ -161,12 +161,17 @@ window.PanoramaView = {
           <input ref="styleRefInput" type="file" accept="image/*" @change="onStyleRefUpload" class="hidden-input" />
         </div>
         <button class="pano-action-btn" :disabled="!genFloorPlan || generating" @click="doGenerate">
-          {{ generating ? '生成中（约2-3分钟）...' : 'AI生成全景' }}
+          {{ generating ? '生成中...' : 'AI生成全景' }}
         </button>
         <!-- 生成进度 -->
         <div v-if="generating" class="pano-progress">
           <div class="pano-progress-item">
-            <span>AI 正在生成全景图</span>
+            <div class="pano-gen-spinner"></div>
+            <div class="pano-gen-info">
+              <span class="pano-gen-status">AI 正在生成全景图</span>
+              <span class="pano-gen-timer">已用 {{ genElapsedText }}</span>
+              <span class="pano-gen-hint">预计 1-3 分钟，请耐心等待</span>
+            </div>
           </div>
         </div>
       </div>
@@ -241,6 +246,9 @@ window.PanoramaView = {
     const activeMode = ref(null);
     const stitching = ref(false);
     const generating = ref(false);
+    const genElapsed = ref(0); // 生成已用秒数
+    const genElapsedText = ref('0:00');
+    let genTimer = null;
     const panoramaUrl = ref('');
     const panoDownloadUrl = ref(''); // 全景图下载 URL（避免 async 函数绑定到 href）
     const historyList = ref([]);
@@ -502,6 +510,15 @@ window.PanoramaView = {
     
     async function doGenerate() {
       generating.value = true;
+      // 启动计时器
+      genElapsed.value = 0;
+      genElapsedText.value = '0:00';
+      genTimer = setInterval(() => {
+        genElapsed.value += 1;
+        const m = Math.floor(genElapsed.value / 60);
+        const s = genElapsed.value % 60;
+        genElapsedText.value = m + ':' + (s < 10 ? '0' : '') + s;
+      }, 1000);
       try {
         // 架构改造：从 IndexedDB 读平面图 blob
         let planBlob;
@@ -581,6 +598,8 @@ window.PanoramaView = {
       } catch (err) {
         showPanoToast('生成失败: ' + err.message);
       }
+      // 停止计时器
+      if (genTimer) { clearInterval(genTimer); genTimer = null; }
       generating.value = false;
     }
     
@@ -959,7 +978,7 @@ window.PanoramaView = {
     
     return {
       activeMode, facePositions, uploadFaces, uploadFaceUrls, canStitch,
-      stitching, generating, panoramaUrl, panoDownloadUrl, correcting, historyList,
+      stitching, generating, genElapsedText, panoramaUrl, panoDownloadUrl, correcting, historyList,
       genFloorPlan, genStyleRef, genStyleDesc, genFloorPlanUrl, genStyleRefUrl,
       cameraStep, cameraPhotos, cameraPreviewUrls, cameraVideo, panoViewer, fileInput,
       floorplanInput, styleRefInput,

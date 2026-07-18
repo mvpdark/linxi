@@ -2529,6 +2529,46 @@ img {
 .pano-progress-item .done { color: var(--accent-green); }
 .pano-progress-item .pending { color: var(--text-tertiary); }
 
+/* AI 生成进度（带计时器） */
+.pano-gen-spinner {
+  width: 24px;
+  height: 24px;
+  border: 3px solid rgba(122,155,122,0.2);
+  border-top-color: #7A9B7A;
+  border-radius: 50%;
+  animation: pano-spin 0.8s linear infinite;
+  flex-shrink: 0;
+}
+
+@keyframes pano-spin {
+  to { transform: rotate(360deg); }
+}
+
+.pano-gen-info {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+
+.pano-gen-status {
+  font-size: 14px;
+  font-weight: 600;
+  color: #2C3E2C;
+}
+
+.pano-gen-timer {
+  font-size: 13px;
+  color: #7A9B7A;
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+}
+
+.pano-gen-hint {
+  font-size: 12px;
+  color: #8E8E93;
+}
+
 .pano-camera-container {
   position: relative;
   width: 100%;
