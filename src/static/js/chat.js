@@ -75,21 +75,21 @@ window.ChatView = {
     // AI 动态表情包（Q版3D猫娘 APNG 动画）
     // ============================================================
     const EMOJI_URLS = {
-      thinking: '/uploads/emoji/animated/thinking.apng',
-      working: '/uploads/emoji/animated/meeting.apng',
-      apologizing: '/uploads/emoji/animated/apologizing.apng',
-      happy: '/uploads/emoji/animated/happy.apng',
-      idle: '/uploads/emoji/animated/idle.apng',
+      thinking: './assets/emoji/animated/thinking.apng',
+      working: './assets/emoji/animated/meeting.apng',
+      apologizing: './assets/emoji/animated/apologizing.apng',
+      happy: './assets/emoji/animated/happy.apng',
+      idle: './assets/emoji/animated/idle.apng',
     };
 
     // 子 Agent 表情包 URL 映射
     const AGENT_EMOJI_URLS = {
-      space_planner: { idle: null, working: '/uploads/emoji/agents/animated/space_planner/working.apng', done: '/uploads/emoji/agents/animated/space_planner/done.apng', error: '/uploads/emoji/agents/animated/space_planner/error.apng' },
-      color_material: { idle: null, working: '/uploads/emoji/agents/animated/color_material/working.apng', done: '/uploads/emoji/agents/animated/color_material/done.apng', error: '/uploads/emoji/agents/animated/color_material/error.apng' },
-      lighting: { idle: null, working: '/uploads/emoji/agents/animated/lighting/working.apng', done: '/uploads/emoji/agents/animated/lighting/done.apng', error: '/uploads/emoji/agents/animated/lighting/error.apng' },
-      budget: { idle: null, working: '/uploads/emoji/agents/animated/budget/working.apng', done: '/uploads/emoji/agents/animated/budget/done.apng', error: '/uploads/emoji/agents/animated/budget/error.apng' },
-      vision_analyst: { idle: null, working: '/uploads/emoji/agents/animated/vision_analyst/working.apng', done: '/uploads/emoji/agents/animated/vision_analyst/done.apng', error: '/uploads/emoji/agents/animated/vision_analyst/error.apng' },
-      image_generator: { idle: null, working: '/uploads/emoji/agents/animated/image_generator/working.apng', done: '/uploads/emoji/agents/animated/image_generator/done.apng', error: '/uploads/emoji/agents/animated/image_generator/error.apng' },
+      space_planner: { idle: null, working: './assets/emoji/agents/animated/space_planner/working.apng', done: './assets/emoji/agents/animated/space_planner/done.apng', error: './assets/emoji/agents/animated/space_planner/error.apng' },
+      color_material: { idle: null, working: './assets/emoji/agents/animated/color_material/working.apng', done: './assets/emoji/agents/animated/color_material/done.apng', error: './assets/emoji/agents/animated/color_material/error.apng' },
+      lighting: { idle: null, working: './assets/emoji/agents/animated/lighting/working.apng', done: './assets/emoji/agents/animated/lighting/done.apng', error: './assets/emoji/agents/animated/lighting/error.apng' },
+      budget: { idle: null, working: './assets/emoji/agents/animated/budget/working.apng', done: './assets/emoji/agents/animated/budget/done.apng', error: './assets/emoji/agents/animated/budget/error.apng' },
+      vision_analyst: { idle: null, working: './assets/emoji/agents/animated/vision_analyst/working.apng', done: './assets/emoji/agents/animated/vision_analyst/done.apng', error: './assets/emoji/agents/animated/vision_analyst/error.apng' },
+      image_generator: { idle: null, working: './assets/emoji/agents/animated/image_generator/working.apng', done: './assets/emoji/agents/animated/image_generator/done.apng', error: './assets/emoji/agents/animated/image_generator/error.apng' },
     };
 
     /** 获取子 Agent 的表情 URL（拼接 apiBase） */
@@ -224,25 +224,72 @@ window.ChatView = {
     /** 修正图片 URL（兼容旧格式 /xxx.jpg → /uploads/xxx.jpg，并拼接 apiBase） */
     function fixImageUrl(url) {
       if (!url) return url;
+      // 架构改造：图片 ID / data URL / http URL 直接返回，交给异步解析器
+      if (window.ImageStore && window.ImageStore.isImageId(url)) return url;
+      if (url.startsWith('data:')) return url;
+      if (url.startsWith('http://') || url.startsWith('https://')) return url;
       if (url.startsWith('/uploads/')) return getImgUrl(url);
       if (url.startsWith('/static/')) return getImgUrl(url); // 服务端 /static/ 资源统一拼 apiBase，兼容打包应用
       if (url.startsWith('/api/')) return getImgUrl(url); // 带签名 /api/ 资源也拼 apiBase（?sig= 原样保留）
-      if (url.startsWith('http://') || url.startsWith('https://')) return url;
       // 旧格式：/upload_xxx.jpg 或 /generated_xxx.png
       if (url.startsWith('/')) return getImgUrl('/uploads' + url);
       return url;
     }
 
     /**
-     * 解析 AI 消息内容，分离文本和 [IMAGE]url[/IMAGE] 标记。
-     * 返回数组：[{ type: 'text', content: '...' }, { type: 'image', url: '...' }]
+     * 架构改造：处理 [IMAGE]data:...[/IMAGE] 内容
+     * 把其中的 data URL 存 IndexedDB，替换为 img ID
+     * @param {string} content 原始内容
+     * @returns {Promise<string>} 处理后的内容
      */
-    function parseContent(content) {
+    async function processImageContent(content) {
+      if (!content || !window.ImageStore) return content;
+      // 匹配所有 [IMAGE]xxx[/IMAGE]
+      const regex = /\[IMAGE\](.*?)\[\/IMAGE\]/g;
+      const matches = [...content.matchAll(regex)];
+      if (matches.length === 0) return content;
+      let result = content;
+      for (const m of matches) {
+        const url = m[1];
+        // 只处理 data URL，http URL 原样保留
+        if (url.startsWith('data:')) {
+          const imgId = await window.ImageStore.saveImage(url);
+          result = result.replace(m[0], `[IMAGE]${imgId}[/IMAGE]`);
+        }
+      }
+      return result;
+    }
+
+    /**
+     * 架构改造：处理单个图片 URL
+     * data URL 存 IndexedDB 返回 ID；其他原样返回
+     */
+    async function processSingleImageUrl(url) {
+      if (!url || !window.ImageStore) return url;
+      if (url.startsWith('data:')) {
+        return await window.ImageStore.saveImage(url);
+      }
+      return url;
+    }
+
+    /**
+     * 解析 AI 消息内容，分离文本和 [IMAGE]url[/IMAGE] 标记。
+     * 返回数组：[{ type: 'text', content: '...' }, { type: 'image', url: '...', resolvedUrl: '...' }]
+     *
+     * 架构改造：图片可能是 ID / data URL / 旧 /uploads/ URL
+     * - ID：异步从 IndexedDB 读，先返回占位，解析完成后填充 msg._resolvedImageUrls
+     * - data URL：直接可用
+     * - 旧 URL：走 getImgUrl 拼接
+     */
+    function parseContent(content, msg) {
       if (!content) return [{ type: 'text', content: '' }];
       const parts = [];
       const regex = /\[IMAGE\](.*?)\[\/IMAGE\]/g;
       let lastIndex = 0;
       let match;
+      let imgIndex = 0;
+      // 从 msg._resolvedImageUrls 取已解析的 blob URL（按顺序对应每个 [IMAGE] 标记）
+      const resolvedUrls = (msg && msg._resolvedImageUrls) || [];
       while ((match = regex.exec(content)) !== null) {
         if (match.index > lastIndex) {
           const text = content.slice(lastIndex, match.index);
@@ -250,7 +297,15 @@ window.ChatView = {
             parts.push({ type: 'text', content: text });
           }
         }
-        parts.push({ type: 'image', url: fixImageUrl(match[1].trim()) });
+        const rawUrl = match[1].trim();
+        // resolvedUrls[imgIndex] 存在则用，否则用 fixImageUrl 回退
+        const resolved = resolvedUrls[imgIndex];
+        parts.push({
+          type: 'image',
+          url: fixImageUrl(rawUrl),
+          resolvedUrl: resolved || fixImageUrl(rawUrl),
+        });
+        imgIndex++;
         lastIndex = regex.lastIndex;
       }
       if (lastIndex < content.length) {
@@ -259,7 +314,6 @@ window.ChatView = {
           parts.push({ type: 'text', content: text });
         }
       }
-      // 如果没有匹配到任何内容，返回原始文本
       if (parts.length === 0) {
         parts.push({ type: 'text', content: content });
       }
@@ -541,6 +595,8 @@ window.ChatView = {
           content: msg.content || '',
           image_url: msg.image_url || '',
         }));
+        // 架构改造：异步把消息中的图片 ID 解析为可显示的 blob URL
+        resolveMessageImages();
         // 如果没有历史消息，添加欢迎消息
         if (messages.value.length === 0) {
           addWelcomeMessage();
@@ -549,6 +605,75 @@ window.ChatView = {
       } catch (e) {
         console.error('加载历史失败:', e);
       }
+    }
+
+    /**
+     * 架构改造：异步解析所有消息中的图片引用
+     * - 用户消息 image_url：可能是 ID / data URL / 旧 /uploads/ URL
+     * - AI 消息 content 中的 [IMAGE]xxx[/IMAGE]：xxx 可能是 ID / data URL
+     * 解析后追加 _resolvedImageUrl / _resolvedImageUrls 字段（blob URL）供模板显示
+     */
+    async function resolveMessageImages() {
+      if (!window.ImageStore) return;
+      for (const msg of messages.value) {
+        // 用户图片
+        if (msg.image_url && !msg._resolvedImageUrl) {
+          try {
+            const url = await window.ImageStore.resolveUrl(msg.image_url);
+            msg._resolvedImageUrl = url || '';
+          } catch (e) {
+            console.warn('解析用户图片失败:', msg.image_url, e);
+          }
+        }
+        // AI 图片（[IMAGE]xxx[/IMAGE]）
+        if (msg.role === 'assistant' && msg.content && msg.content.indexOf('[IMAGE]') >= 0) {
+          // 提取所有 [IMAGE]xxx[/IMAGE] 中的 xxx，按顺序解析
+          const regex = /\[IMAGE\](.*?)\[\/IMAGE\]/g;
+          const urls = [];
+          let m;
+          while ((m = regex.exec(msg.content)) !== null) {
+            urls.push(m[1].trim());
+          }
+          if (urls.length > 0 && !msg._resolvedImageUrls) {
+            msg._resolvedImageUrls = new Array(urls.length).fill('');
+            // 触发响应式更新：Vue 3 的 ref 对数组元素的赋值会触发更新
+            // 逐个解析，解析完一个就更新一个
+            for (let i = 0; i < urls.length; i++) {
+              try {
+                const resolved = await window.ImageStore.resolveUrl(urls[i]);
+                msg._resolvedImageUrls[i] = resolved || '';
+                // 强制触发响应式更新
+                msg._resolvedImageUrls = [...msg._resolvedImageUrls];
+              } catch (e) {
+                console.warn('解析 AI 图片失败:', urls[i], e);
+              }
+            }
+          }
+        }
+        // 搜索图片（msg.images 数组）
+        if (msg.images && msg.images.length > 0 && !msg._resolvedSearchImages) {
+          msg._resolvedSearchImages = new Array(msg.images.length).fill('');
+          for (let i = 0; i < msg.images.length; i++) {
+            try {
+              const resolved = await window.ImageStore.resolveUrl(msg.images[i]);
+              msg._resolvedSearchImages[i] = resolved || '';
+              msg._resolvedSearchImages = [...msg._resolvedSearchImages];
+            } catch (e) {
+              console.warn('解析搜索图片失败:', msg.images[i], e);
+            }
+          }
+        }
+      }
+    }
+
+    /** 获取搜索图片的解析后 URL（供模板用） */
+    function getResolvedSearchImageUrl(msg, index) {
+      if (msg._resolvedSearchImages && msg._resolvedSearchImages[index]) {
+        return msg._resolvedSearchImages[index];
+      }
+      // 回退：直接拼 getImgUrl
+      const url = msg.images && msg.images[index];
+      return url ? (url.startsWith('data:') ? url : getImgUrl(url)) : '';
     }
 
     // ============================================================
@@ -584,10 +709,10 @@ window.ChatView = {
         }
       };
 
-      ws.onmessage = (event) => {
+      ws.onmessage = async (event) => {
         try {
           const data = JSON.parse(event.data);
-          handleWsMessage(data);
+          await handleWsMessage(data);
         } catch (e) {
           console.error('解析 WS 消息失败:', e);
         }
@@ -679,7 +804,7 @@ window.ChatView = {
     // WebSocket 消息处理
     // ============================================================
 
-    function handleWsMessage(data) {
+    async function handleWsMessage(data) {
       switch (data.type) {
         case 'pong':
         case 'heartbeat':
@@ -744,7 +869,10 @@ window.ChatView = {
           }
           // 如果是图片生成 Agent，更新最后一条 AI 消息
           if (key === 'image_generator' && content) {
-            updateLastAiMessage(content);
+            // 架构改造：把 [IMAGE]data:...[/IMAGE] 中的 data URL 存 IndexedDB，
+            // 替换为 [IMAGE]imgId[/IMAGE]，避免长字符串污染内存和历史
+            const processed = await processImageContent(content);
+            updateLastAiMessage(processed);
           }
           break;
         }
@@ -766,10 +894,12 @@ window.ChatView = {
           // 搜索返回的参考图片 — 追加到最后一条 AI 消息中
           const imgUrl = data.content || '';
           if (imgUrl) {
+            // 架构改造：搜索图也可能是 data URL，统一存 IndexedDB
+            const processedUrl = await processSingleImageUrl(imgUrl);
             ensureLastAiMessage();
             const last = messages.value[messages.value.length - 1];
             if (!last.images) last.images = [];
-            last.images.push(imgUrl);
+            last.images.push(processedUrl);
           }
           break;
         }
@@ -861,6 +991,12 @@ window.ChatView = {
       ensureLastAiMessage();
       const last = messages.value[messages.value.length - 1];
       last.content = content;
+      // 架构改造：content 可能含 [IMAGE]imgId[/IMAGE]，触发异步解析
+      if (content && content.indexOf('[IMAGE]') >= 0) {
+        // 清空旧的解析结果，重新解析
+        last._resolvedImageUrls = null;
+        resolveMessageImages();
+      }
       scrollToBottom();
     }
 
@@ -893,8 +1029,15 @@ window.ChatView = {
           return;
         }
         const data = await res.json();
-        if (data.url) {
-          pendingImage.value = { url: data.url, filename: data.filename };
+        // 架构改造：后端返回 {image: dataUrl, id: imgId}
+        // 前端存 IndexedDB，pendingImage 只保留 ID（给 WS 用）
+        if (data.image && data.id && window.ImageStore) {
+          await window.ImageStore.saveImage(data.image, data.id);
+          pendingImage.value = { url: data.id, filename: data.id };
+        } else if (data.image) {
+          // 后端未给 ID，前端自动生成
+          const autoId = await window.ImageStore.saveImage(data.image);
+          pendingImage.value = { url: autoId, filename: autoId };
         }
       } catch (err) {
         console.error('上传图片失败:', err);
@@ -948,7 +1091,14 @@ window.ChatView = {
         role: 'user',
         content: text,
         image_url: imageUrl,
+        // 架构改造：imageUrl 是 ID，需要异步解析为可显示的 blob URL
+        _resolvedImageUrl: '',
       }]);
+
+      // 异步解析新添加的用户图片
+      if (imageUrl) {
+        resolveMessageImages();
+      }
 
       // 清空输入
       inputText.value = '';
@@ -1307,6 +1457,9 @@ window.ChatView = {
       onMouseDownModal,
       modalOrientation,
 
+      // 架构改造：图片本地存储相关
+      getResolvedSearchImageUrl,
+
       // 导航
       goBack,
       openImageEdit,
@@ -1563,9 +1716,9 @@ window.ChatView = {
         <!-- 用户消息图片 -->
         <img
           v-if="msg.role === 'user' && msg.image_url"
-          :src="fixImageUrl(msg.image_url)"
+          :src="msg._resolvedImageUrl || ''"
           class="msg-image"
-          @click="openImageModal(fixImageUrl(msg.image_url))"
+          @click="openImageModal(msg._resolvedImageUrl)"
           alt="用户图片"
         />
 
@@ -1609,18 +1762,18 @@ window.ChatView = {
           <!-- 旧格式：image_url 字段 + content 不含 [IMAGE] 标记 -->
           <img
             v-if="msg.image_url && !(msg.content || '').includes('[IMAGE]')"
-            :src="fixImageUrl(msg.image_url)"
+            :src="msg._resolvedImageUrl || ''"
             class="msg-image msg-image-block"
-            @click="openImageModal(fixImageUrl(msg.image_url))"
+            @click="openImageModal(msg._resolvedImageUrl)"
             alt="AI生成图片"
           />
           <!-- 新格式：content 中含 [IMAGE]url[/IMAGE] 标记 -->
-          <template v-for="(part, pi) in parseContent(msg.content)" :key="pi">
+          <template v-for="(part, pi) in parseContent(msg.content, msg)" :key="pi">
             <img
               v-if="part.type === 'image'"
-              :src="part.url"
+              :src="part.resolvedUrl || part.url"
               class="msg-image msg-image-block"
-              @click="openImageModal(part.url)"
+              @click="openImageModal(part.resolvedUrl || part.url)"
               alt="AI生成图片"
             />
             <span v-else-if="part.content.trim() && part.content.trim() !== '[已生成效果图]'">{{ part.content }}</span>
@@ -1629,10 +1782,10 @@ window.ChatView = {
           <div v-if="msg.images && msg.images.length" class="msg-search-images">
             <img
               v-for="(imgUrl, si) in msg.images"
-              :key="imgUrl"
-              :src="getImgUrl(imgUrl)"
+              :key="imgUrl + '-' + si"
+              :src="getResolvedSearchImageUrl(msg, si)"
               class="msg-search-img"
-              @click="openImageModal(getImgUrl(imgUrl))"
+              @click="openImageModal(getResolvedSearchImageUrl(msg, si))"
               @error="removeSearchImage(msg, imgUrl)"
               loading="lazy"
               alt="搜索参考图"

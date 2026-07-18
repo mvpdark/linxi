@@ -52,6 +52,8 @@ window.ImageEditView = {
 
     /** 上传后的图片 URL（用于显示和后续 API 调用） */
     const imageUrl = ref('');
+    /** 架构改造：用于显示的 blob URL（从 IndexedDB 异步解析） */
+    const imageUrlResolved = ref('');
 
     /** 上传后的图片文件名 */
     const imageName = ref('');
@@ -71,6 +73,8 @@ window.ImageEditView = {
 
     /** 生成结果图片 URL */
     const resultUrl = ref('');
+    /** 架构改造：用于显示的 blob URL（从 IndexedDB 异步解析） */
+    const resultUrlResolved = ref('');
     const toastMsg = ref('');
     let toastTimer = null;
     let errorTimer = null;
@@ -913,12 +917,29 @@ window.ImageEditView = {
         }
 
         const uploadData = await uploadRes.json();
-        imageUrl.value = uploadData.url;
-        imageName.value = uploadData.filename || 'upload.jpg';
+        // 架构改造：后端返回 {image: dataUrl, id: imgId}
+        // 前端存 IndexedDB，imageUrl 用 ID 引用，另存 _resolvedUrl 给显示用
+        if (uploadData.image && window.ImageStore) {
+          const imgId = uploadData.id || await window.ImageStore.saveImage(uploadData.image);
+          if (!uploadData.id) {
+            await window.ImageStore.saveImage(uploadData.image, imgId);
+          }
+          imageUrl.value = imgId;
+          imageName.value = imgId;
+          // 异步解析给显示用
+          const blobUrl = await window.ImageStore.getImageUrl(imgId);
+          imageUrlResolved.value = blobUrl;
+        } else {
+          // 兼容旧格式
+          imageUrl.value = uploadData.url;
+          imageUrlResolved.value = getImgUrl(uploadData.url);
+        }
 
         // 并行等待：图片加载 + VLM 检测结果
+        // 架构改造：用本地 blob URL 加载图片，不再走后端 URL
+        const imgLoadUrl = imageUrlResolved.value || getImgUrl(imageUrl.value);
         const [img, detectData] = await Promise.all([
-          loadImage(getImgUrl(uploadData.url)),
+          loadImage(imgLoadUrl),
           detectPromise,
         ]);
 
@@ -1040,12 +1061,22 @@ window.ImageEditView = {
         // 准备 FormData
         const formData = new FormData();
 
-        // 获取要发送的文件（优先使用原始 File，否则从 URL 获取）
+        // 获取要发送的文件（优先使用原始 File，否则从 IndexedDB 恢复）
         let fileToSend = originalFile;
         if (!fileToSend && imageUrl.value) {
-          const response = await fetchWithTimeout(getImgUrl(imageUrl.value));
-          if (!response.ok) throw new Error('原图已失效，请重新上传');
-          fileToSend = await response.blob();
+          // 架构改造：从 IndexedDB 读 data URL，转 blob
+          if (window.ImageStore && window.ImageStore.isImageId(imageUrl.value)) {
+            const dataUrl = await window.ImageStore.getImageDataUrl(imageUrl.value);
+            if (dataUrl) {
+              const resp = await fetch(dataUrl);
+              fileToSend = await resp.blob();
+            }
+          } else {
+            // 兼容旧 URL：从后端获取
+            const response = await fetchWithTimeout(getImgUrl(imageUrl.value));
+            if (!response.ok) throw new Error('原图已失效，请重新上传');
+            fileToSend = await response.blob();
+          }
         }
         if (!fileToSend) {
           throw new Error('没有可用的图片文件');
@@ -1122,8 +1153,22 @@ window.ImageEditView = {
           throw new Error((data && data.error) || '服务器错误(' + res.status + ')');
         }
 
-        if (data && data.success && data.url) {
+        if (data && data.success && data.image) {
+          // 架构改造：后端返回 {image: dataUrl}，存 IndexedDB，显示用 blob URL
+          if (window.ImageStore) {
+            const resultId = await window.ImageStore.saveImage(data.image);
+            resultUrl.value = resultId;
+            resultUrlResolved.value = await window.ImageStore.getImageUrl(resultId);
+          } else {
+            resultUrl.value = data.image;
+            resultUrlResolved.value = data.image;
+          }
+          step.value = 'result';
+          saveSession();
+        } else if (data && data.success && data.url) {
+          // 兼容旧格式
           resultUrl.value = data.url;
+          resultUrlResolved.value = getImgUrl(data.url);
           step.value = 'result';
           saveSession();
         } else {
@@ -1157,7 +1202,13 @@ window.ImageEditView = {
     function saveResult() {
       if (!resultUrl.value) return;
       const a = document.createElement('a');
-      a.href = getImgUrl(resultUrl.value);
+      // 架构改造：优先用已解析的 blob URL，否则从 IndexedDB 异步取
+      const href = resultUrlResolved.value;
+      if (!href) {
+        showToast('图片正在加载，请稍候');
+        return;
+      }
+      a.href = href;
       a.download = 'generated_' + Date.now() + '.png';
       document.body.appendChild(a);
       a.click();
@@ -1195,10 +1246,19 @@ window.ImageEditView = {
       if (!resultUrl.value) return;
 
       try {
-        // 把结果图作为新的上传文件
-        const response = await fetchWithTimeout(getImgUrl(resultUrl.value));
-        if (!response.ok) throw new Error('结果图已失效，请重新生成');
-        const blob = await response.blob();
+        // 架构改造：从 IndexedDB 读 data URL，转 blob
+        let blob;
+        if (window.ImageStore && window.ImageStore.isImageId(resultUrl.value)) {
+          const dataUrl = await window.ImageStore.getImageDataUrl(resultUrl.value);
+          if (!dataUrl) throw new Error('结果图已失效，请重新生成');
+          const resp = await fetch(dataUrl);
+          blob = await resp.blob();
+        } else {
+          // 兼容旧 URL
+          const response = await fetchWithTimeout(getImgUrl(resultUrl.value));
+          if (!response.ok) throw new Error('结果图已失效，请重新生成');
+          blob = await response.blob();
+        }
         const file = new File(
           [blob],
           'edited_' + Date.now() + '.png',
@@ -1253,7 +1313,14 @@ window.ImageEditView = {
       // 仅 edit 步骤需要重建画布；result 步骤只展示结果图，无需初始化 Konva
       if (restored && imageUrl.value && step.value === 'edit') {
         try {
-          const img = await loadImage(getImgUrl(imageUrl.value));
+          // 架构改造：从 IndexedDB 异步解析图片 URL
+          let imgLoadUrl = imageUrlResolved.value;
+          if (!imgLoadUrl && window.ImageStore && window.ImageStore.isImageId(imageUrl.value)) {
+            imgLoadUrl = await window.ImageStore.getImageUrl(imageUrl.value);
+            imageUrlResolved.value = imgLoadUrl;
+          }
+          if (!imgLoadUrl) imgLoadUrl = getImgUrl(imageUrl.value);
+          const img = await loadImage(imgLoadUrl);
           loadedImage = img;
           await nextTick();
           initKonva(img);
@@ -1318,6 +1385,7 @@ window.ImageEditView = {
       promptText,
       selectedPrompt,
       resultUrl,
+      resultUrlResolved,
       toastMsg,
       selectedCount,
       hasSelected,
@@ -1499,7 +1567,7 @@ window.ImageEditView = {
     <!-- ---------- 结果展示 ---------- -->
     <div v-else-if="step === 'result'">
       <div class="ie-result">
-        <img :src="getImgUrl(resultUrl)" alt="生成结果" @error="onResultImgError" />
+        <img :src="resultUrlResolved" alt="生成结果" @error="onResultImgError" />
       </div>
       <div class="ie-result-actions">
         <button class="ie-btn ie-btn-secondary ripple-btn" @click="resetEdit">重新编辑</button>

@@ -163,7 +163,10 @@
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 8px 16px;
+  /* 安全区：避开安卓/iOS 状态栏（CSS env + JS polyfill fallback） */
+  padding: calc(env(safe-area-inset-top, 0px) + 8px) 16px 8px;
+  /* Android WebView 常不支持 env()，用最小 padding 兜底 */
+  padding-top: max(env(safe-area-inset-top, 0px) + 8px, 24px);
   background: linear-gradient(135deg, #7A9B7A 0%, #6B8B6B 100%);
   color: #FFFFFF;
   font-size: 13px;
@@ -298,7 +301,8 @@
   }
   
   .balance-bar {
-    padding: 6px 12px;
+    padding: calc(env(safe-area-inset-top, 0px) + 6px) 12px 6px;
+    padding-top: max(env(safe-area-inset-top, 0px) + 6px, 22px);
     font-size: 12px;
   }
   
