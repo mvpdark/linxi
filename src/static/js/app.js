@@ -97,7 +97,7 @@ window.getWsUrl = function getWsUrl(path) {
  */
 window.getImgUrl = function getImgUrl(path) {
   if (!path) return path;
-  if (/^(https?:|data:|blob:)/i.test(path)) return path;
+  if (/^(https?:|data:|blob:|\.\/)/i.test(path)) return path; // ./ 开头为本地相对路径，不拼 apiBase
   return window.API_CONFIG.apiBase + path;
 };
 
@@ -187,6 +187,66 @@ const app = createApp({
     // === 格式化时间（复用全局实现） ===
     const formatTime = window.formatTime;
 
+    // === 用户菜单 ===
+    const showUserMenu = Vue.ref(false);
+    const userInfo = Vue.ref({
+      username: '',
+      role: '',
+      balance: 0,
+    });
+
+    // 从 AuthManager 加载用户信息
+    function loadUserInfo() {
+      if (window.AuthManager && window.AuthManager.getUser) {
+        const user = window.AuthManager.getUser() || {};
+        userInfo.value = {
+          username: user.username || '',
+          role: user.role || '',
+          balance: parseFloat(user.balance) || 0,
+        };
+      }
+    }
+
+    // 刷新余额（调用 /api/auth/me）
+    async function refreshBalance() {
+      try {
+        const res = await apiFetch('/api/auth/me');
+        if (res.ok) {
+          const data = await res.json();
+          if (data.ok) {
+            userInfo.value.balance = parseFloat(data.balance) || 0;
+            // 同步到 AuthManager
+            if (window.AuthManager && window.AuthManager.updateBalanceDisplay) {
+              window.AuthManager.updateBalanceDisplay(data.balance);
+            }
+          }
+        }
+      } catch (e) {
+        console.error('刷新余额失败:', e);
+      }
+    }
+
+    function handleUserLogout() {
+      if (window.AuthManager && window.AuthManager.logout) {
+        window.AuthManager.logout();
+      }
+    }
+
+    // 点击空白处关闭菜单
+    function onDocClick(e) {
+      if (showUserMenu.value) {
+        showUserMenu.value = false;
+      }
+    }
+
+    // 监听 showUserMenu 变化，打开时刷新余额
+    Vue.watch(showUserMenu, (val) => {
+      if (val) {
+        loadUserInfo();
+        refreshBalance();
+      }
+    });
+
     function onResize() {
       isDesktop.value = window.innerWidth >= 768;
     }
@@ -194,13 +254,16 @@ const app = createApp({
     onMounted(() => {
       window.addEventListener('hashchange', parseHash);
       window.addEventListener('resize', onResize);
+      document.addEventListener('click', onDocClick);
       onResize();
       loadSessions();
+      loadUserInfo();
     });
 
     onUnmounted(() => {
       window.removeEventListener('hashchange', parseHash);
       window.removeEventListener('resize', onResize);
+      document.removeEventListener('click', onDocClick);
     });
 
     return {
@@ -211,6 +274,9 @@ const app = createApp({
       navigate,
       openSession,
       formatTime,
+      showUserMenu,
+      userInfo,
+      handleUserLogout,
     };
   },
 });
