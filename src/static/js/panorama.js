@@ -774,6 +774,11 @@ window.PanoramaView = {
         minHfov: 50,
         maxHfov: 120,
       });
+      // 加载失败时显示中文提示（避免 Pannellum 默认英文错误）
+      pannellumViewer.on('loadError', function() {
+        showPanoToast('全景图加载失败，图片可能已过期或不存在');
+        setTimeout(() => closeViewer(), 1500);
+      });
     }
     
     function closeViewer() {
