@@ -658,7 +658,7 @@ private fun ResultContent(
                     modifier = Modifier.size(18.dp),
                 )
                 Spacer(Modifier.width(6.dp))
-                Text("重新编辑")
+                Text("返回编辑")
             }
             Button(
                 onClick = viewModel::continueEdit,
@@ -671,7 +671,7 @@ private fun ResultContent(
                     modifier = Modifier.size(18.dp),
                 )
                 Spacer(Modifier.width(6.dp))
-                Text("继续编辑")
+                Text("重新开始")
             }
         }
     }
@@ -708,6 +708,8 @@ private fun DrawScope.drawAnnotations(
         if (obj.polygon != null && obj.polygon.size >= 3) {
             val path = Path().apply {
                 obj.polygon.forEachIndexed { idx, point ->
+                    // 顶点长度校验：跳过无效顶点，防止 IndexOutOfBoundsException
+                    if (point.size < 2) return@forEachIndexed
                     val pointX = point[0] * w
                     val pointY = point[1] * h
                     if (idx == 0) moveTo(pointX, pointY) else lineTo(pointX, pointY)
@@ -762,14 +764,17 @@ private fun pointInPolygon(
     y: Float,
     polygon: List<List<Float>>,
 ): Boolean {
+    // 顶点长度校验：过滤掉长度不足 2 的无效顶点，防止 IndexOutOfBoundsException
+    val safePolygon = polygon.filter { it.size >= 2 }
+    if (safePolygon.size < 3) return false
     var inside = false
-    val n = polygon.size
+    val n = safePolygon.size
     for (i in 0 until n) {
         val j = (i + n - 1) % n
-        val xi = polygon[i][0]
-        val yi = polygon[i][1]
-        val xj = polygon[j][0]
-        val yj = polygon[j][1]
+        val xi = safePolygon[i][0]
+        val yi = safePolygon[i][1]
+        val xj = safePolygon[j][0]
+        val yj = safePolygon[j][1]
         val intersect = (yi > y) != (yj > y) &&
             x < (xj - xi) * (y - yi) / (yj - yi) + xi
         if (intersect) inside = !inside

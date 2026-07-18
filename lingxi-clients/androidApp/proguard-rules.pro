@@ -24,3 +24,9 @@
 
 # 项目模型类（序列化）
 -keep class top.mvpdark.lingxi.data.model.** { *; }
+
+# ONNX Runtime (native reflection)
+-keep class ai.onnxruntime.** { *; }
+
+# SAM service classes
+-keep class top.mvpdark.lingxi.sam.** { *; }

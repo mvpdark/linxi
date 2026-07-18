@@ -71,6 +71,9 @@ class ImageEditViewModel(
     private val _uiState = MutableStateFlow(ImageEditUiState())
     val uiState: StateFlow<ImageEditUiState> = _uiState.asStateFlow()
 
+    /** 重入保护：防止 onPickImage / startEdit 被并发调用导致状态错乱。 */
+    private val isProcessing = kotlin.concurrent.AtomicBoolean(false)
+
     /**
      * 用户选图后调用：上传 → VLM 检测 → SAM 分割 → 进入编辑模式。
      *
@@ -80,9 +83,12 @@ class ImageEditViewModel(
      * @param bytes 原始图片字节流
      */
     fun onPickImage(bytes: ByteArray) {
-        // 重入保护：正在处理中时不接受新图片
+        // 重入保护：AtomicBoolean 原子抢占，防止并发调用
+        if (!isProcessing.compareAndSet(false, true)) return
+        // 二次检查：正在处理中的步骤不接受新图片
         val currentStep = _uiState.value.step
         if (currentStep == Step.Analyzing || currentStep == Step.Segmenting || currentStep == Step.Generating) {
+            isProcessing.set(false)
             return
         }
 
@@ -190,6 +196,8 @@ class ImageEditViewModel(
                         error = e.message ?: "图片处理失败",
                     )
                 }
+            } finally {
+                isProcessing.set(false)
             }
         }
     }
@@ -232,41 +240,51 @@ class ImageEditViewModel(
      * - 无选中物体时走 [ImageEditRepository.editImage]（直接改图）
      */
     fun startEdit() {
+        // 重入保护：AtomicBoolean 原子抢占，防止并发触发改图
+        if (!isProcessing.compareAndSet(false, true)) return
         val state = _uiState.value
-        val bytes = state.originalBytes ?: return
+        val bytes = state.originalBytes
+        if (bytes == null) {
+            isProcessing.set(false)
+            return
+        }
 
         viewModelScope.launch {
-            _uiState.update {
-                it.copy(step = Step.Generating, isEditing = true, error = null)
-            }
-
-            val selectedObjects = state.objects.filter { it.selected }
-            val result = if (selectedObjects.isNotEmpty()) {
-                // 有选中物体：带区域标注改图
-                val prompt = state.selectedPrompt.ifEmpty { "优化选中区域" }
-                repository.editImageAnnotated(bytes, "image.jpg", prompt, selectedObjects)
-            } else {
-                // 无选中：直接改图
-                val prompt = state.promptText.ifEmpty { "优化图片" }
-                repository.editImage(bytes, "image.jpg", prompt)
-            }
-
-            if (result.success && result.image.isNotEmpty()) {
+            try {
                 _uiState.update {
-                    it.copy(
-                        step = Step.Result,
-                        resultUrl = result.image,
-                        isEditing = false,
-                    )
+                    it.copy(step = Step.Generating, isEditing = true, error = null)
                 }
-            } else {
-                _uiState.update {
-                    it.copy(
-                        step = Step.Edit,
-                        isEditing = false,
-                        error = result.error.ifEmpty { "改图失败，请重试" },
-                    )
+
+                val selectedObjects = state.objects.filter { it.selected }
+                val result = if (selectedObjects.isNotEmpty()) {
+                    // 有选中物体：带区域标注改图
+                    val prompt = state.selectedPrompt.ifEmpty { "优化选中区域" }
+                    repository.editImageAnnotated(bytes, "image.jpg", prompt, selectedObjects)
+                } else {
+                    // 无选中：直接改图
+                    val prompt = state.promptText.ifEmpty { "优化图片" }
+                    repository.editImage(bytes, "image.jpg", prompt)
                 }
+
+                if (result.success && result.image.isNotEmpty()) {
+                    _uiState.update {
+                        it.copy(
+                            step = Step.Result,
+                            resultUrl = result.image,
+                            isEditing = false,
+                        )
+                    }
+                } else {
+                    _uiState.update {
+                        it.copy(
+                            step = Step.Edit,
+                            isEditing = false,
+                            error = result.error.ifEmpty { "改图失败，请重试" },
+                        )
+                    }
+                }
+            } finally {
+                isProcessing.set(false)
             }
         }
     }
@@ -289,11 +307,12 @@ class ImageEditViewModel(
     }
 
     /**
-     * 结果图作为新底图继续编辑。
+     * 重新开始：重置所有状态，回到上传步骤。
      *
-     * 注意：commonMain 不能直接用 java.util.Base64 解码 data URL。
-     * 当前实现重置到上传步骤，让用户重新选图；
-     * 后续可通过 expect/actual 提供平台相关的 Base64 解码实现。
+     * 注意：理想语义应为"将结果图作为新底图继续编辑"，但 commonMain 不能直接用
+     * java.util.Base64 解码 data URL 为 ByteArray，无法将结果图设为新的 originalBytes。
+     * 当前实现先重置到上传步骤，让用户重新选图；UI 侧按钮文案已对齐为"重新开始"。
+     * 后续可通过 expect/actual 提供平台相关的 Base64 解码实现，再恢复"继续编辑"语义。
      */
     fun continueEdit() {
         _uiState.value = ImageEditUiState()

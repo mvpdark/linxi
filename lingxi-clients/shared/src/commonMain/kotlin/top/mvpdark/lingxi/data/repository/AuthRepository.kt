@@ -4,9 +4,10 @@ import io.ktor.client.call.body
 import io.ktor.client.request.get
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
-import io.ktor.http.HttpStatusCode
+import io.ktor.http.isSuccess
 import top.mvpdark.lingxi.core.network.ApiClient
 import top.mvpdark.lingxi.core.network.TokenStore
+import top.mvpdark.lingxi.core.util.runCatchingCancellable
 import top.mvpdark.lingxi.data.model.LoginRequest
 import top.mvpdark.lingxi.data.model.LoginResponse
 import top.mvpdark.lingxi.data.model.MeResponse
@@ -24,6 +25,10 @@ class AuthRepository(
         val response = apiClient.httpClient.post("/api/auth/login") {
             setBody(LoginRequest(username, password))
         }
+        if (!response.status.isSuccess()) {
+            val errorBody = runCatchingCancellable { response.body<LoginResponse>() }.getOrNull()
+            throw AuthException(errorBody?.error?.ifBlank { "用户名或密码错误" } ?: "用户名或密码错误")
+        }
         val body: LoginResponse = response.body()
         if (!body.ok) {
             throw AuthException(body.error.ifBlank { "用户名或密码错误" })
@@ -39,8 +44,12 @@ class AuthRepository(
         val response = apiClient.httpClient.post("/api/auth/register") {
             setBody(RegisterRequest(username, password))
         }
-        if (response.status != HttpStatusCode.OK) {
-            val body: LoginResponse = response.body()
+        if (!response.status.isSuccess()) {
+            val errorBody = runCatchingCancellable { response.body<LoginResponse>() }.getOrNull()
+            throw AuthException(errorBody?.error?.ifBlank { "注册失败" } ?: "注册失败")
+        }
+        val body: LoginResponse = response.body()
+        if (!body.ok) {
             throw AuthException(body.error.ifBlank { "注册失败" })
         }
         return true
@@ -53,7 +62,7 @@ class AuthRepository(
 
     /** 退出登录：通知后端 + 清除本地 token。 */
     suspend fun logout() {
-        runCatching {
+        runCatchingCancellable {
             apiClient.httpClient.post("/api/auth/logout")
         }
         tokenStore.clear()

@@ -50,12 +50,19 @@ object SamImageProcessor {
 
         // 1. 长边 resize 到 1024（保持宽高比）
         val scale = TARGET_SIZE.toFloat() / maxOf(width, height)
-        val newW = maxOf(1, (width * scale).toInt())
-        val newH = maxOf(1, (height * scale).toInt())
+        val newW = minOf(TARGET_SIZE, maxOf(1, (width * scale).toInt()))
+        val newH = minOf(TARGET_SIZE, maxOf(1, (height * scale).toInt()))
 
         // 2. pad 到 1024×1024（右下补 0）+ 归一化 + HWC→CHW
-        // FloatArray 默认初始化为 0，即 pad 区域与超出 newW/newH 的部分均为 0
         val pixelValues = FloatArray(3 * TARGET_SIZE * TARGET_SIZE)
+        // 预填充 pad 区域为归一化后的零值 (0 - mean) / std
+        // SAM 预处理器是先 pad(raw 0) 再归一化，pad 区域应为 (0/255 - mean) / std
+        for (c in 0 until 3) {
+            val padVal = (0f - MEAN[c]) / STD[c]
+            for (i in 0 until TARGET_SIZE * TARGET_SIZE) {
+                pixelValues[c * TARGET_SIZE * TARGET_SIZE + i] = padVal
+            }
+        }
         val channelStride = TARGET_SIZE * TARGET_SIZE
         val xRatio = width.toFloat() / newW
         val yRatio = height.toFloat() / newH

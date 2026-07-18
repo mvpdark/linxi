@@ -25,6 +25,9 @@ actual fun maskToPngBase64(mask: ByteArray, width: Int, height: Int): String {
     if (mask.isEmpty() || width <= 0 || height <= 0) {
         return ""
     }
+    require(mask.size <= width * height) {
+        "mask size ${mask.size} exceeds ${width}x${height}=${width * height}"
+    }
 
     // 1. 创建 TYPE_INT_ARGB BufferedImage
     val image = BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB)
@@ -42,10 +45,10 @@ actual fun maskToPngBase64(mask: ByteArray, width: Int, height: Int): String {
         }
     }
 
-    // 3. ImageIO 编码 PNG
-    val outputStream = ByteArrayOutputStream()
-    ImageIO.write(image, "PNG", outputStream)
-
-    // 4. Base64 编码
-    return Base64.getEncoder().encodeToString(outputStream.toByteArray())
+    // 3. ImageIO 编码 PNG（用 use 包裹确保资源释放）
+    return ByteArrayOutputStream().use { outputStream ->
+        ImageIO.write(image, "PNG", outputStream)
+        // 4. Base64 编码
+        Base64.getEncoder().encodeToString(outputStream.toByteArray())
+    }
 }

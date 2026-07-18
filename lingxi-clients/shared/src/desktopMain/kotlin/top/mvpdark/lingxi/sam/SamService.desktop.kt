@@ -44,10 +44,10 @@ import java.nio.LongBuffer
 actual class SamService actual constructor(@Suppress("UNUSED_PARAMETER") context: PlatformContext) {
 
     private val env: OrtEnvironment = OrtEnvironment.getEnvironment()
-    private var visionSession: OrtSession? = null
-    private var decoderSession: OrtSession? = null
+    @Volatile private var visionSession: OrtSession? = null
+    @Volatile private var decoderSession: OrtSession? = null
 
-    actual var isReady: Boolean = false
+    @Volatile actual var isReady: Boolean = false
         private set
 
     // 动态发现的 IO 名称（模型导出时可能使用不同命名）
@@ -203,8 +203,10 @@ actual class SamService actual constructor(@Suppress("UNUSED_PARAMETER") context
                 // 创建 original_sizes tensor (shape [2]，int64)
                 // 注意：部分模型可能期望 [1, 2]，如遇形状不匹配请调整此处
                 val origSizes = longArrayOf(origH.toLong(), origW.toLong())
+                // 检测模型期望的 original_sizes shape：[2] 或 [1, 2]
+                val origSizeShape = resolveOrigSizeShape(decoder, decoderOrigSizeName)
                 val origSizesTensor = OnnxTensor.createTensor(
-                    env, LongBuffer.wrap(origSizes), longArrayOf(2),
+                    env, LongBuffer.wrap(origSizes), origSizeShape,
                 )
                 resources.add(origSizesTensor)
 
@@ -242,23 +244,25 @@ actual class SamService actual constructor(@Suppress("UNUSED_PARAMETER") context
                 val shape = predMasksTensor.info.shape
                 println("[SamService:Desktop] pred_masks shape: ${shape.toList()}")
 
-                // 提取 mask 浮点数据（扁平化）
-                val total = shape.fold(1L) { acc, dim -> acc * dim }.toInt()
-                val flat = FloatArray(total)
-                predMasksTensor.floatBuffer.get(flat)
-
                 // 解析维度：[1, N, (C), H, W] 或 [N, (C), H, W] 或 [N, H, W]
-                val (hLow, wLow, maskStride) = resolveMaskDims(shape)
+                val (hLow, wLow, _) = resolveMaskDims(shape)
+
+                // 按物体逐个读取 mask，避免大块 FloatArray 分配导致 OOM
+                val maskStride = hLow * wLow * resolveMaskChannelCount(shape)
+                val scratch = FloatArray(maskStride)
+                val maskBuffer = predMasksTensor.floatBuffer
 
                 // 5. 后处理：逐物体提取 mask → 上采样 → 多边形 / PNG（同 Android）
                 val results = mutableListOf<SamObject>()
                 for (i in 0 until n) {
-                    val offset = i * maskStride
                     val maskSize = hLow * wLow
+                    // 读取当前物体的 mask 到 scratch（按通道连续布局）
+                    maskBuffer.position(i * maskStride)
+                    maskBuffer.get(scratch, 0, maskStride)
                     val maskBytes = ByteArray(maskSize)
-                    // 按 0 阈值二值化（logit > 0 为前景）
+                    // 按 0 阈值二值化（logit > 0 为前景，取第 0 通道）
                     for (j in 0 until maskSize) {
-                        maskBytes[j] = if (flat[offset + j] > 0f) 1 else 0
+                        maskBytes[j] = if (scratch[j] > 0f) 1 else 0
                     }
 
                     // 上采样到原图尺寸
@@ -420,6 +424,35 @@ actual class SamService actual constructor(@Suppress("UNUSED_PARAMETER") context
             else -> throw IllegalStateException(
                 "不支持的 pred_masks 维度: ${shape.size}D, shape=${shape.toList()}",
             )
+        }
+    }
+
+    /**
+     * 解析模型期望的 original_sizes shape。
+     * SAM 2 / EdgeTAM 不同导出版本可能期望 [2] 或 [1, 2]。
+     */
+    private fun resolveOrigSizeShape(decoder: OrtSession, name: String): LongArray {
+        return runCatching {
+            val nodeInfo = decoder.inputInfo[name] ?: return@runCatching longArrayOf(2)
+            val tensorInfo = nodeInfo.info as? ai.onnxruntime.TensorInfo
+                ?: return@runCatching longArrayOf(2)
+            val infoShape = tensorInfo.shape
+            if (infoShape != null && infoShape.size == 2 && infoShape[0] == 1L) {
+                longArrayOf(1, 2)
+            } else {
+                longArrayOf(2)
+            }
+        }.getOrDefault(longArrayOf(2))
+    }
+
+    /**
+     * 解析 mask 的通道数。
+     */
+    private fun resolveMaskChannelCount(shape: LongArray): Int {
+        return when (shape.size) {
+            5 -> shape[2].toInt()  // [1, N, C, H, W]
+            4 -> shape[1].toInt()  // [N, C, H, W]
+            else -> 1              // [N, H, W] 或 [1, N, H, W]
         }
     }
 

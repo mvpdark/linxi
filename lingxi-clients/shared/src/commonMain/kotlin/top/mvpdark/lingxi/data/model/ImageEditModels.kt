@@ -63,7 +63,7 @@ data class VlmObject(
 /** /api/upload 响应。 */
 @Serializable
 data class UploadResponse(
-    val success: Boolean = true,
+    val success: Boolean = false,
     /** data:image/...;base64,... */
     val image: String = "",
     val id: String? = null,

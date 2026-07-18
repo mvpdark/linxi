@@ -10,6 +10,7 @@ import io.ktor.client.plugins.websocket.webSocket
 import io.ktor.http.HttpMethod
 import io.ktor.websocket.Frame
 import io.ktor.websocket.readText
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
@@ -17,6 +18,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.serialization.encodeToString
 import top.mvpdark.lingxi.core.network.ApiClient
 import top.mvpdark.lingxi.core.network.TokenStore
+import top.mvpdark.lingxi.core.util.runCatchingCancellable
 import top.mvpdark.lingxi.data.model.AgentEvent
 import top.mvpdark.lingxi.data.model.AuthFrame
 import top.mvpdark.lingxi.data.model.ChatFrame
@@ -82,45 +84,63 @@ class ChatRepository(
         }
 
         val wsUrl = "${apiClient.wsBaseUrl}/ws/chat"
-        apiClient.httpClient.webSocket(
-            method = HttpMethod.Get,
-            request = {
-                url(wsUrl)
-            },
-        ) {
-            // 1. 首帧鉴权
-            val authFrame = apiClient.json.encodeToString(AuthFrame(token = token))
-            send(Frame.Text(authFrame))
+        try {
+            apiClient.httpClient.webSocket(
+                method = HttpMethod.Get,
+                request = {
+                    url(wsUrl)
+                },
+            ) {
+                // 1. 首帧鉴权
+                val authFrame = apiClient.json.encodeToString(AuthFrame(token = token))
+                send(Frame.Text(authFrame))
 
-            // 2. 发送聊天消息
-            val chatFrame = apiClient.json.encodeToString(
-                ChatFrame(sessionId = sessionId, message = message, imageUrl = imageUrl)
-            )
-            send(Frame.Text(chatFrame))
-
-            // 3. 接收流式事件
-            for (frame in incoming) {
-                if (!isActive) break
-                when (frame) {
-                    is Frame.Text -> {
-                        val text = frame.readText()
-                        val event = runCatching {
-                            apiClient.json.decodeFromString(AgentEvent.serializer(), text)
-                        }.getOrNull() ?: continue
-
-                        trySend(event)
-
-                        if (event.type == "done" || event.type == "error") {
-                            break
-                        }
+                // 等待服务端确认鉴权
+                val authAck = incoming.receiveCatching().getOrNull() as? Frame.Text
+                if (authAck != null) {
+                    val ackText = authAck.readText()
+                    if (!ackText.contains("auth_ok")) {
+                        trySend(AgentEvent(type = "error", error = "鉴权失败：$ackText"))
+                        close()
+                        return@webSocket
                     }
-                    is Frame.Binary -> Unit
-                    is Frame.Close -> break
-                    else -> Unit
+                }
+
+                // 2. 发送聊天消息
+                val chatFrame = apiClient.json.encodeToString(
+                    ChatFrame(sessionId = sessionId, message = message, imageUrl = imageUrl)
+                )
+                send(Frame.Text(chatFrame))
+
+                // 3. 接收流式事件
+                for (frame in incoming) {
+                    if (!isActive) break
+                    when (frame) {
+                        is Frame.Text -> {
+                            val text = frame.readText()
+                            val event = runCatchingCancellable {
+                                apiClient.json.decodeFromString(AgentEvent.serializer(), text)
+                            }.getOrNull() ?: continue
+
+                            trySend(event)
+
+                            if (event.type == "done" || event.type == "error") {
+                                break
+                            }
+                        }
+                        is Frame.Binary -> Unit
+                        is Frame.Close -> break
+                        else -> Unit
+                    }
                 }
             }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            trySend(AgentEvent(type = "error", error = e.message ?: "WebSocket 连接失败"))
+        } finally {
+            close()
         }
-        close()
         awaitClose { }
     }
 }

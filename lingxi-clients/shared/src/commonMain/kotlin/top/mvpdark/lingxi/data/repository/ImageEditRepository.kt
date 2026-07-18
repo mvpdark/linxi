@@ -9,6 +9,7 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.content.PartData
 import kotlinx.serialization.encodeToString
 import top.mvpdark.lingxi.core.network.ApiClient
+import top.mvpdark.lingxi.core.util.runCatchingCancellable
 import top.mvpdark.lingxi.data.model.DetectedObject
 import top.mvpdark.lingxi.data.model.EditRegion
 import top.mvpdark.lingxi.data.model.ImageEditResponse
@@ -19,7 +20,7 @@ import top.mvpdark.lingxi.data.model.VlmDetectResponse
  * 图像编辑仓库：封装 /api/upload、/api/vlm-detect、/api/image-edit[-annotated] 接口。
  *
  * 所有方法均通过 multipart/form-data 上传图片二进制，响应统一反序列化为
- * 对应的数据模型。失败时用 [runCatching] 包裹，返回带 error 字段的响应，
+ * 对应的数据模型。失败时用 [runCatchingCancellable] 包裹，返回带 error 字段的响应，
  * 不向调用方抛出异常，便于 UI 层直接展示错误信息。
  *
  * @param apiClient 共享的 API 客户端（复用 httpClient 与 json）
@@ -34,7 +35,7 @@ class ImageEditRepository(
      * 后端返回 {success, image: dataUrl, id, url}。
      */
     suspend fun uploadImage(bytes: ByteArray, fileName: String): UploadResponse {
-        return runCatching {
+        return runCatchingCancellable {
             apiClient.httpClient.submitFormWithBinaryData(
                 url = "/api/upload",
                 formData = formData {
@@ -53,7 +54,7 @@ class ImageEditRepository(
      * 后端返回 {success, objects: [{id, label, bbox}]}。
      */
     suspend fun vlmDetect(bytes: ByteArray, fileName: String): VlmDetectResponse {
-        return runCatching {
+        return runCatchingCancellable {
             apiClient.httpClient.submitFormWithBinaryData(
                 url = "/api/vlm-detect",
                 formData = formData {
@@ -78,7 +79,7 @@ class ImageEditRepository(
         resolution: String = "1K",
         ratio: String = "1:1",
     ): ImageEditResponse {
-        return runCatching {
+        return runCatchingCancellable {
             apiClient.httpClient.submitFormWithBinaryData(
                 url = "/api/image-edit",
                 formData = formData {
@@ -125,7 +126,7 @@ class ImageEditRepository(
         }
         val regionsJson = apiClient.json.encodeToString(editRegions)
 
-        return runCatching {
+        return runCatchingCancellable {
             apiClient.httpClient.submitFormWithBinaryData(
                 url = "/api/image-edit-annotated",
                 formData = formData {

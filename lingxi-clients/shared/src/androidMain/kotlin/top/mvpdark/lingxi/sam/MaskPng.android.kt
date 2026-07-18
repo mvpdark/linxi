@@ -22,24 +22,29 @@ import java.io.ByteArrayOutputStream
  */
 actual fun maskToPngBase64(mask: ByteArray, width: Int, height: Int): String {
     if (mask.isEmpty() || width <= 0 || height <= 0) return ""
+    require(mask.size <= width * height) {
+        "mask size ${mask.size} exceeds ${width}x${height}=${width * height}"
+    }
     return runCatching {
         // 1. 创建 ARGB_8888 Bitmap
         val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        try {
+            // 2. mask[i] > 0 → 像素不透明白色，否则全透明
+            val pixels = IntArray(width * height)
+            for (i in mask.indices) {
+                pixels[i] = if (mask[i] > 0) WHITE_ARGB else TRANSPARENT_ARGB
+            }
+            bitmap.setPixels(pixels, 0, width, 0, 0, width, height)
 
-        // 2. mask[i] > 0 → 像素不透明白色，否则全透明
-        val pixels = IntArray(width * height)
-        for (i in mask.indices) {
-            pixels[i] = if (mask[i] > 0) WHITE_ARGB else TRANSPARENT_ARGB
+            // 3. compress(PNG) → ByteArrayOutputStream
+            val outputStream = ByteArrayOutputStream()
+            bitmap.compress(Bitmap.CompressFormat.PNG, 100, outputStream)
+
+            // 4. Base64.encodeToString(NO_WRAP)
+            Base64.encodeToString(outputStream.toByteArray(), Base64.NO_WRAP)
+        } finally {
+            bitmap.recycle()
         }
-        bitmap.setPixels(pixels, 0, width, 0, 0, width, height)
-
-        // 3. compress(PNG) → ByteArrayOutputStream
-        val stream = ByteArrayOutputStream()
-        bitmap.compress(Bitmap.CompressFormat.PNG, 100, stream)
-        bitmap.recycle()
-
-        // 4. Base64.encodeToString(NO_WRAP)
-        Base64.encodeToString(stream.toByteArray(), Base64.NO_WRAP)
     }.getOrElse { "" }
 }
 

@@ -9,6 +9,7 @@ import top.mvpdark.lingxi.sam.SamService
  * Desktop 平台 Koin 模块：提供 [TokenStore] 和 [SamService]。
  */
 val platformModule = module {
-    single { TokenStore(PlatformContext()) }
-    single { SamService(PlatformContext()) }
+    single { PlatformContext() }
+    single { TokenStore(get()) }
+    single { SamService(get()) }
 }

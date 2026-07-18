@@ -61,7 +61,7 @@ data class MeResponse(
 /** 聊天会话。 */
 @Serializable
 data class ChatSession(
-    val id: String,
+    val id: String = "",
     val title: String = "新对话",
     val pinned: Boolean = false,
     @SerialName("created_at") val createdAt: String = "",
