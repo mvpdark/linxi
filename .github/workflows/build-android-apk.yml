@@ -42,22 +42,37 @@ jobs:
       - name: Sync Capacitor Android
         run: cd frontend-capacitor && npx cap sync android
 
-      - name: Build Debug APK
+      - name: Build Release APK
+        env:
+          LINGXI_KEYSTORE_PATH: ${{ github.workspace }}/lingxi.keystore
+          LINGXI_KEYSTORE_PASSWORD: ${{ secrets.LINGXI_KEYSTORE_PASSWORD || 'android' }}
+          LINGXI_KEY_ALIAS: ${{ secrets.LINGXI_KEY_ALIAS || 'lingxi' }}
+          LINGXI_KEY_PASSWORD: ${{ secrets.LINGXI_KEY_PASSWORD || 'android' }}
         run: |
+          # 生成签名密钥（如果 GitHub Secrets 未配置，则使用默认 debug 密钥）
+          if [ -n "${{ secrets.LINGXI_KEYSTORE_BASE64 }}" ]; then
+            echo "${{ secrets.LINGXI_KEYSTORE_BASE64 }}" | base64 -d > lingxi.keystore
+          else
+            keytool -genkeypair -v -keystore lingxi.keystore -alias lingxi \
+              -keyalg RSA -keysize 2048 -validity 36500 \
+              -storepass android -keypass android \
+              -dname "CN=Lingxi, OU=Dev, O=MvpDark, L=Beijing, ST=Beijing, C=CN"
+          fi
+
           cd frontend-capacitor/android
           chmod +x gradlew
-          ./gradlew assembleDebug --no-daemon
+          ./gradlew assembleRelease --no-daemon
 
       - name: Rename APK with version
         run: |
-          cp frontend-capacitor/android/app/build/outputs/apk/debug/app-debug.apk \
-             lingxi-${{ github.run_number }}-debug.apk
+          cp frontend-capacitor/android/app/build/outputs/apk/release/app-release.apk \
+             lingxi-${{ github.run_number }}.apk
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: lingxi-debug-apk
-          path: frontend-capacitor/android/app/build/outputs/apk/debug/*.apk
+          name: lingxi-apk
+          path: frontend-capacitor/android/app/build/outputs/apk/release/*.apk
           retention-days: 30
 
       - name: Create Tag and Release
@@ -66,21 +81,23 @@ jobs:
           tag_name: v1.0.${{ github.run_number }}
           name: 灵犀 v1.0.${{ github.run_number }}
           body: |
-            ## 灵犀 Android APK
+            ## 灵犀 Android APK（Release 完整版）
 
             **版本**: v1.0.${{ github.run_number }}
             **构建时间**: ${{ github.event.head_commit.timestamp }}
             **提交**: ${{ github.sha }}
 
             ### 下载说明
-            - 点击下方 `lingxi-${{ github.run_number }}-debug.apk` 下载安装包
-            - 这是 Debug 版本，安装时需开启"允许未知来源"
+            - 点击下方 `lingxi-${{ github.run_number }}.apk` 下载安装包
+            - Release 签名版本，已包含 SAM 2 前端本地分割（EdgeTAM）
+            - 安装时需开启"允许未知来源"
             - 后端地址: https://lx.mvpdark.top:8443
 
             ### 最新特性
-            - 用户登录与计费系统
+            - 用户登录与计费系统（余额熔断）
+            - SAM 2 前端本地分割（EdgeTAM + transformers.js）
+            - 用户面板（余额、历史记录）
             - Let's Encrypt HTTPS 证书
             - Cloudflare DDNS 自动同步
-            - 灵犀图标 (Resonant Silence 设计)
-          files: lingxi-${{ github.run_number }}-debug.apk
+          files: lingxi-${{ github.run_number }}.apk
           prerelease: false
