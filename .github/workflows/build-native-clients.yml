@@ -137,38 +137,50 @@ jobs:
         run: |
           mkdir -p release-assets
 
-          # 复制并重命名 APK (debug)
-          if [ -d artifacts/lingxi-android-debug ]; then
-            cp artifacts/lingxi-android-debug/*.apk release-assets/lingxi-android-debug.apk 2>/dev/null && echo "✓ Debug APK" || echo "✗ No APK in lingxi-android-debug"
-          else
-            echo "✗ artifacts/lingxi-android-debug not found"
-          fi
+          # 递归查找文件（upload-artifact 保留了完整路径结构，文件在深层子目录）
+          copy_asset() {
+            local artifact_dir="$1"
+            local pattern="$2"
+            local output_name="$3"
+            local label="$4"
 
-          # 复制并重命名 MSI
-          if [ -d artifacts/lingxi-desktop-msi ]; then
-            cp artifacts/lingxi-desktop-msi/*.msi release-assets/lingxi-desktop.msi 2>/dev/null && echo "✓ Desktop MSI" || echo "✗ No MSI in lingxi-desktop-msi"
-          else
-            echo "✗ artifacts/lingxi-desktop-msi not found"
-          fi
+            if [ ! -d "$artifact_dir" ]; then
+              echo "✗ $label: directory $artifact_dir not found"
+              return 0
+            fi
 
-          # 复制并重命名 EXE
-          if [ -d artifacts/lingxi-desktop-exe ]; then
-            cp artifacts/lingxi-desktop-exe/*.exe release-assets/lingxi-desktop-portable.exe 2>/dev/null && echo "✓ Desktop EXE" || echo "✗ No EXE in lingxi-desktop-exe"
-          else
-            echo "✗ artifacts/lingxi-desktop-exe not found"
-          fi
+            local found_file
+            found_file=$(find "$artifact_dir" -name "$pattern" -type f | head -1)
+            if [ -n "$found_file" ]; then
+              cp "$found_file" "release-assets/$output_name"
+              local size_mb
+              size_mb=$(du -m "release-assets/$output_name" | cut -f1)
+              echo "✓ $label: $output_name (${size_mb} MB) ← $(basename "$found_file")"
+            else
+              echo "✗ $label: no $pattern found in $artifact_dir"
+              # Debug: show what's actually in the directory
+              echo "  Contents:"
+              find "$artifact_dir" -type f | head -5 | while read -r f; do
+                echo "    $f"
+              done
+            fi
+          }
 
-          # 如果有 Release APK 也加上
+          copy_asset "artifacts/lingxi-android-debug" "*.apk" "lingxi-android-debug.apk" "Debug APK"
+          copy_asset "artifacts/lingxi-desktop-msi" "*.msi" "lingxi-desktop.msi" "Desktop MSI"
+          copy_asset "artifacts/lingxi-desktop-exe" "*.exe" "lingxi-desktop-portable.exe" "Desktop EXE"
+
           if [ -d artifacts/lingxi-android-release ]; then
-            cp artifacts/lingxi-android-release/*.apk release-assets/lingxi-android-release.apk 2>/dev/null && echo "✓ Release APK" || true
+            copy_asset "artifacts/lingxi-android-release" "*.apk" "lingxi-android-release.apk" "Release APK"
           fi
 
           echo "=== Release assets ==="
           ls -la release-assets/
 
-          # 验证至少有一个文件
-          if [ -z "$(ls -A release-assets/ 2>/dev/null)" ]; then
-            echo "ERROR: No release assets found!"
+          # 验证至少有 APK + MSI（EXE 可选）
+          asset_count=$(ls -1 release-assets/ 2>/dev/null | wc -l)
+          if [ "$asset_count" -lt 2 ]; then
+            echo "ERROR: Expected at least 2 assets (APK + MSI), got $asset_count"
             exit 1
           fi
 
