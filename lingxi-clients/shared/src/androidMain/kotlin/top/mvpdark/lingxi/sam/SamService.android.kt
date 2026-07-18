@@ -180,7 +180,7 @@ actual class SamService actual constructor(private val context: PlatformContext)
                 }
                 // 创建 input_boxes tensor (shape [1, N, 4])
                 val boxesTensor = OnnxTensor.createTensor(
-                    env, boxes, longArrayOf(1, n.toLong(), 4),
+                    env, FloatBuffer.wrap(boxes), longArrayOf(1, n.toLong(), 4),
                 )
                 resources.add(boxesTensor)
 
@@ -205,7 +205,7 @@ actual class SamService actual constructor(private val context: PlatformContext)
                     if (decoder.inputNames.contains(name)) {
                         val reshapedSizes = longArrayOf(reshapedH.toLong(), reshapedW.toLong())
                         val reshapedTensor = OnnxTensor.createTensor(
-                            env, reshapedSizes, longArrayOf(2),
+                            env, LongBuffer.wrap(reshapedSizes), longArrayOf(2),
                         )
                         resources.add(reshapedTensor)
                         decoderInputs[name] = reshapedTensor

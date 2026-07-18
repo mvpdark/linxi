@@ -414,7 +414,6 @@ private fun EditContent(
             }
 
             // 已选中数量提示
-            val selectedCount = state.objects.count { it.selected }
             if (selectedCount > 0) {
                 val labels = state.objects
                     .filter { it.selected }

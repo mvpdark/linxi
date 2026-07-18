@@ -10,6 +10,8 @@ import top.mvpdark.lingxi.data.model.Bbox
 import java.io.ByteArrayInputStream
 import java.io.File
 import javax.imageio.ImageIO
+import java.nio.FloatBuffer
+import java.nio.LongBuffer
 
 /**
  * SAM 2 分割服务 Desktop (JVM) 实现。
@@ -194,7 +196,7 @@ actual class SamService actual constructor(@Suppress("UNUSED_PARAMETER") context
                 }
                 // 创建 input_boxes tensor (shape [1, N, 4])
                 val boxesTensor = OnnxTensor.createTensor(
-                    env, boxes, longArrayOf(1, n.toLong(), 4),
+                    env, FloatBuffer.wrap(boxes), longArrayOf(1, n.toLong(), 4),
                 )
                 resources.add(boxesTensor)
 
@@ -219,7 +221,7 @@ actual class SamService actual constructor(@Suppress("UNUSED_PARAMETER") context
                     if (decoder.inputNames.contains(name)) {
                         val reshapedSizes = longArrayOf(reshapedH.toLong(), reshapedW.toLong())
                         val reshapedTensor = OnnxTensor.createTensor(
-                            env, reshapedSizes, longArrayOf(2),
+                            env, LongBuffer.wrap(reshapedSizes), longArrayOf(2),
                         )
                         resources.add(reshapedTensor)
                         decoderInputs[name] = reshapedTensor

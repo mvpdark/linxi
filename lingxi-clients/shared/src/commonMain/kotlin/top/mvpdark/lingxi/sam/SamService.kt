@@ -47,6 +47,7 @@ expect class SamService(context: PlatformContext) {
 
     /** 模型是否已加载就绪。 */
     var isReady: Boolean
+        private set
 
     /**
      * 加载 SAM 模型。可多次调用，已加载时直接返回。
