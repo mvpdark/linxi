@@ -98,7 +98,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: lingxi-desktop-msi
-          path: lingxi-clients/desktopApp/build/compose/binaries/main/msi/*.msi
+          path: lingxi-clients/desktopApp/build/compose/binaries/main*/msi/*.msi
+          if-no-files-found: error
           retention-days: 30
 
       - name: Build Desktop Exe (portable)
@@ -109,7 +110,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: lingxi-desktop-exe
-          path: lingxi-clients/desktopApp/build/compose/binaries/main/exe/*.exe
+          path: lingxi-clients/desktopApp/build/compose/binaries/main*/exe/*.exe
+          if-no-files-found: error
           retention-days: 30
 
   release:
