@@ -20,6 +20,7 @@ kotlin {
                 implementation(project(":shared"))
                 implementation(compose.desktop.currentOs)
                 implementation(libs.coroutines.swing)
+                implementation(libs.koin.core)
             }
         }
     }
