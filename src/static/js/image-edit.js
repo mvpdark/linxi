@@ -1536,6 +1536,17 @@ window.ImageEditView = {
 
     <!-- ---------- 编辑 / 生成中 ---------- -->
     <div v-else-if="step === 'edit' || step === 'generating'">
+      <!-- 换图按钮（明显位置） -->
+      <div v-if="step === 'edit'" class="ie-change-image-bar">
+        <button class="ie-change-image-btn" @click="resetAll">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="23 4 23 10 17 10"/>
+            <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+          </svg>
+          换一张图
+        </button>
+      </div>
+
       <!-- Konva Canvas 容器 -->
       <div class="ie-canvas-container" ref="canvasContainerRef"></div>
 

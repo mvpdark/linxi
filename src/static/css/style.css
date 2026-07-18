@@ -1653,6 +1653,33 @@ img {
 
 /* === 改图页面：编辑模式新增样式 === */
 
+/* 换图按钮栏 */
+.ie-change-image-bar {
+  display: flex;
+  justify-content: flex-end;
+  padding: 0 0 8px;
+}
+
+.ie-change-image-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid rgba(122,155,122,0.3);
+  border-radius: 16px;
+  background: rgba(122,155,122,0.06);
+  color: #7A9B7A;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.ie-change-image-btn:active {
+  background: rgba(122,155,122,0.15);
+}
+
 /* Canvas 容器 */
 .ie-canvas-container {
   width: 100%;
