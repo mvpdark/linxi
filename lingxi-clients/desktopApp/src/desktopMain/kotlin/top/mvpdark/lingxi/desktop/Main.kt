@@ -3,6 +3,7 @@ package top.mvpdark.lingxi.desktop
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
+import androidx.compose.ui.window.rememberWindowState
 import org.koin.core.context.startKoin
 import top.mvpdark.lingxi.LingxiApp
 import top.mvpdark.lingxi.di.appModule
@@ -26,8 +27,7 @@ fun main() {
         Window(
             onCloseRequest = ::exitApplication,
             title = "灵犀",
-            width = 1280.dp,
-            height = 800.dp,
+            state = rememberWindowState(width = 1280.dp, height = 800.dp),
         ) {
             LingxiApp()
         }
