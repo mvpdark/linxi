@@ -292,12 +292,36 @@ window.ImageEditView = {
      * @param {string} url — 图片 URL
      * @returns {Promise<HTMLImageElement>}
      */
+    /**
+     * 加载图片为 HTMLImageElement。
+     * 支持 blob: URL、data: URL、http(s) URL。
+     * @param {string} url — 图片 URL
+     * @returns {Promise<HTMLImageElement>}
+     */
     function loadImage(url) {
       return new Promise((resolve, reject) => {
         const img = new Image();
+        img.crossOrigin = 'anonymous';
         img.onload = () => resolve(img);
-        img.onerror = () => reject(new Error('图片加载失败'));
+        img.onerror = (e) => {
+          console.error('[loadImage] 图片加载失败:', url.substring(0, 100), e);
+          reject(new Error('图片加载失败'));
+        };
         img.src = url;
+      });
+    }
+
+    /**
+     * 将 File 转为 data URL（兼容 Android WebView，不依赖 URL.createObjectURL）
+     * @param {File|Blob} file
+     * @returns {Promise<string>} data URL
+     */
+    function fileToDataUrl(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = () => reject(new Error('文件读取失败'));
+        reader.readAsDataURL(file);
       });
     }
 
@@ -383,9 +407,10 @@ window.ImageEditView = {
      * @returns {Promise<File>}
      */
     async function compressImage(file) {
-      const url = URL.createObjectURL(file);
+      // Android WebView 兼容：用 FileReader 转 data URL 加载，不依赖 createObjectURL
+      const dataUrl = await fileToDataUrl(file);
       try {
-        const img = await loadImage(url);
+        const img = await loadImage(dataUrl);
         const scale = Math.min(
           1,
           MAX_DIM / Math.max(img.naturalWidth, img.naturalHeight)
@@ -400,7 +425,7 @@ window.ImageEditView = {
           type: 'image/jpeg',
         });
       } finally {
-        URL.revokeObjectURL(url);
+        // data URL 无需 revoke
       }
     }
 

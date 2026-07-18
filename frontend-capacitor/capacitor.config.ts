@@ -17,6 +17,8 @@ const config: CapacitorConfig = {
   // Android WebView 使用 https://localhost 方案（Cookie/安全上下文更友好）
   android: {
     allowMixedContent: false,
+    // 启用 WebView 调试（生产环境可关闭，调试阶段开启）
+    webContentsDebuggingEnabled: true,
   },
   server: {
     androidScheme: 'https',
