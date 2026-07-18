@@ -111,3 +111,64 @@ jobs:
           name: lingxi-desktop-exe
           path: lingxi-clients/desktopApp/build/compose/binaries/main/exe/*.exe
           retention-days: 30
+
+  release:
+    name: Publish to GitHub Releases
+    needs: [build-android, build-desktop]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: false
+
+      - name: Prepare release assets
+        run: |
+          mkdir -p release-assets
+          # 重命名 APK
+          find artifacts/lingxi-android-debug -name "*.apk" -exec cp {} release-assets/lingxi-android-debug.apk \;
+          # 重命名 MSI
+          find artifacts/lingxi-desktop-msi -name "*.msi" -exec cp {} release-assets/lingxi-desktop.msi \;
+          # 重命名 EXE
+          find artifacts/lingxi-desktop-exe -name "*.exe" -exec cp {} release-assets/lingxi-desktop-portable.exe \;
+          # 如果有 Release APK 也加上
+          if [ -d artifacts/lingxi-android-release ]; then
+            find artifacts/lingxi-android-release -name "*.apk" -exec cp {} release-assets/lingxi-android-release.apk \;
+          fi
+          ls -la release-assets/
+
+      - name: Generate release tag
+        id: tag
+        run: |
+          # 生成版本号: v1.0.0-dev.YYYYMMDD.SHORT_SHA
+          DATE=$(date -u +%Y%m%d)
+          SHORT_SHA=${GITHUB_SHA::7}
+          TAG="v1.0.0-dev.${DATE}.${SHORT_SHA}"
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "Generated tag: $TAG"
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${{ steps.tag.outputs.tag }}" \
+            --title "灵犀 Native Client ${{ steps.tag.outputs.tag }}" \
+            --notes "## 自动构建发布
+
+          **Commit:** ${{ github.sha }}
+          **构建时间:** $(date -u '+%Y-%m-%d %H:%M UTC')
+
+          ### 下载说明
+          - **Android**: 下载 \`lingxi-android-debug.apk\`，允许安装未知来源后安装
+          - **Windows 安装版**: 下载 \`lingxi-desktop.msi\`，双击安装
+          - **Windows 便携版**: 下载 \`lingxi-desktop-portable.exe\`，无需安装直接运行
+
+          > 这是开发版本，可能存在不稳定因素。" \
+            --prerelease \
+            release-assets/*
