@@ -17,8 +17,6 @@ pluginManagement {
     }
 }
 
-dependencyResolutionMode = DependencyResolutionMode.PREFER_PROJECT
-
 dependencyResolutionManagement {
     repositories {
         google()
