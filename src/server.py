@@ -1942,10 +1942,17 @@ if config.serve_frontend:
     # config.json 和 favicon.svg 也需根路径路由
     @app.get("/config.json")
     async def _serve_config_json():
-        return FileResponse(str(_STATIC_DIR / "config.json"))
+        cfg_path = _STATIC_DIR / "config.json"
+        if cfg_path.is_file():
+            return FileResponse(str(cfg_path), media_type="application/json")
+        # 文件不存在时返回默认同源配置，避免 500 错误
+        return JSONResponse({"apiBase": ""})
     @app.get("/favicon.svg")
     async def _serve_favicon_svg():
-        return FileResponse(str(_STATIC_DIR / "favicon.svg"))
+        fav_path = _STATIC_DIR / "favicon.svg"
+        if fav_path.is_file():
+            return FileResponse(str(fav_path), media_type="image/svg+xml")
+        raise HTTPException(404, "favicon not found")
 
 # /uploads 静态挂载改为代理路由：
 #   - 两段路径 /uploads/{username}/{filename} → WebDAV（带本地缓存兜底）
