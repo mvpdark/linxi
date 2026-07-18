@@ -12,6 +12,8 @@ import kotlinx.coroutines.withContext
 import top.mvpdark.lingxi.core.network.PlatformContext
 import top.mvpdark.lingxi.data.model.Bbox
 import java.io.File
+import java.nio.FloatBuffer
+import java.nio.LongBuffer
 
 /**
  * SAM 2 分割服务的 Android 实现。
@@ -154,7 +156,7 @@ actual class SamService actual constructor(private val context: PlatformContext)
                 // 3. 阶段1：vision_encoder 推理
                 //    创建 OnnxTensor (shape [1,3,1024,1024])
                 val pixelTensor = OnnxTensor.createTensor(
-                    env, pixelValues, longArrayOf(1, 3, 1024, 1024),
+                    env, FloatBuffer.wrap(pixelValues), longArrayOf(1, 3, 1024, 1024),
                 )
                 resources.add(pixelTensor)
 
@@ -188,7 +190,7 @@ actual class SamService actual constructor(private val context: PlatformContext)
                 // 注意：部分模型可能期望 [1, 2]，如遇形状不匹配请调整此处
                 val origSizes = longArrayOf(origH.toLong(), origW.toLong())
                 val origSizesTensor = OnnxTensor.createTensor(
-                    env, origSizes, longArrayOf(2),
+                    env, LongBuffer.wrap(origSizes), longArrayOf(2),
                 )
                 resources.add(origSizesTensor)
 

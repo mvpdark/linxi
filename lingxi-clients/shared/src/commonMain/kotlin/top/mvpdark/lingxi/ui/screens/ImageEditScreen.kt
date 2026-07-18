@@ -328,6 +328,7 @@ private fun EditContent(
     viewModel: ImageEditViewModel,
 ) {
     val hasSelected = state.objects.any { it.selected }
+    val selectedCount = state.objects.count { it.selected }
 
     Column(modifier = Modifier.fillMaxSize()) {
         // 可滚动的内容区：图片 + 标注 + 物体列表 + 错误提示
