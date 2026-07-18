@@ -68,7 +68,8 @@ window.ChatView = {
     let heartbeatTimer = null;
     let reconnectTimer = null;
     const wsConnected = ref(false);
-    let pendingMessage = null; // 待发送的消息（等待 ws 连接）
+    let wsAuthed = false; // 首帧鉴权是否已通过（收到 auth_ok 后才允许发送业务消息）
+    let pendingMessage = null; // 待发送的消息（等待 ws 连接 + 鉴权完成）
 
     // ============================================================
     // AI 动态表情包（Q版3D猫娘 APNG 动画）
@@ -205,23 +206,19 @@ window.ChatView = {
     // 工具函数
     // ============================================================
 
-    /** 构建 WebSocket URL（使用全局 apiBase + token） */
+    /** 构建 WebSocket URL（鉴权走连接后首帧 {"type":"auth",...}，URL 不再拼 ?token=） */
     function buildWsUrl() {
       return getWsUrl('/ws/chat');
     }
 
-    /** 格式化时间 */
-    function formatTime(timestamp) {
-      if (!timestamp) return '';
-      const now = Date.now();
-      const ts = typeof timestamp === 'number' ? timestamp : Date.parse(timestamp);
-      const diff = now - ts;
-      if (diff < 60000) return '刚刚';
-      if (diff < 3600000) return Math.floor(diff / 60000) + '分钟前';
-      if (diff < 86400000) return Math.floor(diff / 3600000) + '小时前';
-      if (diff < 604800000) return Math.floor(diff / 86400000) + '天前';
-      const d = new Date(ts);
-      return `${d.getMonth() + 1}月${d.getDate()}日`;
+    /** 格式化时间（复用 app.js 全局实现，组件 setup 在 app.js 加载后执行） */
+    const formatTime = window.formatTime;
+
+    /** 用户可见错误提示（复用 AuthManager 的全局 toast） */
+    function showChatToast(msg) {
+      if (window.AuthManager && window.AuthManager.showToast) {
+        window.AuthManager.showToast(msg, 'error');
+      }
     }
 
     /** 修正图片 URL（兼容旧格式 /xxx.jpg → /uploads/xxx.jpg，并拼接 apiBase） */
@@ -229,7 +226,8 @@ window.ChatView = {
       if (!url) return url;
       if (url.startsWith('/uploads/')) return getImgUrl(url);
       if (url.startsWith('/static/')) return getImgUrl(url); // 服务端 /static/ 资源统一拼 apiBase，兼容打包应用
-      if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('/api/')) return url;
+      if (url.startsWith('/api/')) return getImgUrl(url); // 带签名 /api/ 资源也拼 apiBase（?sig= 原样保留）
+      if (url.startsWith('http://') || url.startsWith('https://')) return url;
       // 旧格式：/upload_xxx.jpg 或 /generated_xxx.png
       if (url.startsWith('/')) return getImgUrl('/uploads' + url);
       return url;
@@ -297,6 +295,10 @@ window.ChatView = {
     async function loadSessions() {
       try {
         const res = await apiFetch('/api/sessions');
+        if (!res.ok) {
+          console.warn('加载会话列表失败: HTTP ' + res.status);
+          return;
+        }
         const data = await res.json();
         // 排序：置顶在前，然后按 updated_at 降序
         const list = data.sessions || [];
@@ -343,6 +345,11 @@ window.ChatView = {
         const res = await apiFetch('/api/sessions?title=' + encodeURIComponent('新对话'), {
           method: 'POST',
         });
+        if (!res.ok) {
+          console.warn('创建会话失败: HTTP ' + res.status);
+          showChatToast('创建会话失败，请重试');
+          return;
+        }
         const data = await res.json();
         activeSessionId.value = data.id;
         activeSessionTitle.value = data.title || '新对话';
@@ -374,7 +381,12 @@ window.ChatView = {
     /** 删除会话 */
     async function deleteSession(sessionId) {
       try {
-        await apiFetch('/api/sessions/' + sessionId, { method: 'DELETE' });
+        const res = await apiFetch('/api/sessions/' + sessionId, { method: 'DELETE' });
+        if (!res.ok) {
+          console.warn('删除会话失败: HTTP ' + res.status);
+          showChatToast('删除会话失败');
+          return;
+        }
         // 如果删除的是当前会话，清空消息
         if (sessionId === activeSessionId.value) {
           activeSessionId.value = '';
@@ -394,7 +406,11 @@ window.ChatView = {
         const url = session.pinned
           ? '/api/sessions/' + session.id + '/unpin'
           : '/api/sessions/' + session.id + '/pin';
-        await apiFetch(url, { method: 'POST' });
+        const res = await apiFetch(url, { method: 'POST' });
+        if (!res.ok) {
+          console.warn('置顶操作失败: HTTP ' + res.status);
+          return;
+        }
         await loadSessions();
       } catch (e) {
         console.error('置顶操作失败:', e);
@@ -405,7 +421,12 @@ window.ChatView = {
     async function clearMemory() {
       if (!confirm('确定要清除长期记忆吗？此操作不可撤销。')) return;
       try {
-        await apiFetch('/api/memory/clear', { method: 'POST' });
+        const res = await apiFetch('/api/memory/clear', { method: 'POST' });
+        if (!res.ok) {
+          console.warn('清除记忆失败: HTTP ' + res.status);
+          showChatToast('清除记忆失败');
+          return;
+        }
         alert('记忆已清除');
       } catch (e) {
         console.error('清除记忆失败:', e);
@@ -508,6 +529,11 @@ window.ChatView = {
       }
       try {
         const res = await apiFetch('/api/sessions/' + sessionId + '/history');
+        if (!res.ok) {
+          console.warn('加载历史失败: HTTP ' + res.status);
+          showChatToast('加载聊天记录失败');
+          return;
+        }
         const data = await res.json();
         const history = data.history || [];
         messages.value = history.map((msg) => ({
@@ -547,13 +573,14 @@ window.ChatView = {
       }
 
       ws.onopen = () => {
-        wsConnected.value = true;
-        startHeartbeat();
-        // 如果有待发消息，立即发送
-        if (pendingMessage) {
-          const msg = pendingMessage;
-          pendingMessage = null;
-          doSendWs(msg);
+        // 首帧鉴权：先发送 {"type":"auth","token":"<jwt>"}，
+        // 待收到 auth_ok 后才标记连接可用（见 handleWsMessage）
+        wsAuthed = false;
+        const jwt = (window.AuthManager && window.AuthManager.getToken && window.AuthManager.getToken()) || '';
+        try {
+          ws.send(JSON.stringify({ type: 'auth', token: jwt }));
+        } catch (e) {
+          console.error('WS 发送鉴权帧失败:', e);
         }
       };
 
@@ -570,8 +597,9 @@ window.ChatView = {
         console.error('WebSocket 错误:', e);
       };
 
-      ws.onclose = () => {
+      ws.onclose = (event) => {
         wsConnected.value = false;
+        wsAuthed = false;
         stopHeartbeat();
         // 连接断开时复位发送锁，避免输入栏永久锁定
         if (sending.value) {
@@ -579,6 +607,13 @@ window.ChatView = {
           agentStatus.visible = false;
           agentStatus.routing = false;
           setEmojiState('idle');
+        }
+        // 4401 = 服务端鉴权失败：统一走 logout（清态 + 弹登录 + 通知），不再自动重连
+        if (event && event.code === 4401) {
+          if (window.AuthManager && window.AuthManager.logout) {
+            window.AuthManager.logout();
+          }
+          return;
         }
         scheduleReconnect();
       };
@@ -626,14 +661,15 @@ window.ChatView = {
         ws = null;
       }
       wsConnected.value = false;
+      wsAuthed = false;
     }
 
-    /** 实际发送 WebSocket 消息 */
+    /** 实际发送 WebSocket 消息（须连接 OPEN 且首帧鉴权已通过，否则排队等待） */
     function doSendWs(msgObj) {
-      if (ws && ws.readyState === WebSocket.OPEN) {
+      if (ws && ws.readyState === WebSocket.OPEN && wsAuthed) {
         ws.send(JSON.stringify(msgObj));
       } else {
-        // 等待连接后发送
+        // 等待连接 + auth_ok 后发送
         pendingMessage = msgObj;
         connectWs();
       }
@@ -647,6 +683,18 @@ window.ChatView = {
       switch (data.type) {
         case 'pong':
         case 'heartbeat':
+          break;
+
+        case 'auth_ok':
+          // 首帧鉴权通过：标记连接可用，启动心跳并补发排队消息
+          wsAuthed = true;
+          wsConnected.value = true;
+          startHeartbeat();
+          if (pendingMessage) {
+            const msg = pendingMessage;
+            pendingMessage = null;
+            doSendWs(msg);
+          }
           break;
 
         case 'routing':
@@ -775,6 +823,11 @@ window.ChatView = {
         case 'error':
           agentStatus.visible = false;
           sending.value = false;
+          // 鉴权失败：静默处理（服务端随后以 4401 关闭，onclose 已接 logout 流程），不追加 AI 气泡
+          if (data.content === 'unauthorized') {
+            setEmojiState('idle');
+            break;
+          }
           setEmojiState('apologizing');
           // 显示错误消息
           messages.value = messages.value.concat([{
@@ -833,6 +886,12 @@ window.ChatView = {
           method: 'POST',
           body: formData,
         });
+        if (!res.ok) {
+          console.warn('上传图片失败: HTTP ' + res.status);
+          showChatToast('图片上传失败，请重试');
+          e.target.value = '';
+          return;
+        }
         const data = await res.json();
         if (data.url) {
           pendingImage.value = { url: data.url, filename: data.filename };
@@ -865,6 +924,11 @@ window.ChatView = {
           const res = await apiFetch('/api/sessions?title=' + encodeURIComponent('新对话'), {
             method: 'POST',
           });
+          if (!res.ok) {
+            console.warn('创建会话失败: HTTP ' + res.status);
+            showChatToast('创建会话失败，请重试');
+            return;
+          }
           const data = await res.json();
           sid = data.id;
           activeSessionId.value = sid;

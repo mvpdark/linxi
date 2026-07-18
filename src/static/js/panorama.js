@@ -286,11 +286,13 @@ window.PanoramaView = {
     const cameraStep = ref(0);
     const cameraPhotos = reactive({});
     const cameraVideo = ref(null);
-    const cameraStream = ref(null);
+    // MediaStream 用普通变量持有：避免 Vue 对原生流对象做深度响应式代理
+    let cameraStream = null;
     const panoViewer = ref(null);
-    
+
     let pannellumViewer = null;
     let abortTimeoutId = null;
+    let generateController = null; // doGenerate 的 AbortController（组件卸载时统一取消）
     
     // === 上传模式 ===
     function triggerUpload(slotKey) {
@@ -311,6 +313,12 @@ window.PanoramaView = {
       formData.append('file', file);
       try {
         const res = await apiFetch('/api/upload', { method: 'POST', body: formData });
+        if (!res.ok) {
+          console.warn('上传图片失败: HTTP ' + res.status);
+          showPanoToast('图片上传失败，请重试');
+          e.target.value = '';
+          return;
+        }
         const data = await res.json();
         uploadFaces[slotKey] = data.url;
         checkCanStitch();
@@ -328,10 +336,20 @@ window.PanoramaView = {
         for (const key of order) {
           // 从 URL 获取图片 blob
           const res = await apiFetch(getImgUrl(uploadFaces[key]));
+          if (!res.ok) {
+            console.warn('读取面图失败: HTTP ' + res.status);
+            throw new Error('读取面图失败(HTTP ' + res.status + ')');
+          }
           const blob = await res.blob();
           formData.append('files', blob, `${key}.jpg`);
         }
         const res = await apiFetch('/api/panorama/stitch', { method: 'POST', body: formData });
+        if (!res.ok) {
+          console.warn('拼接请求失败: HTTP ' + res.status);
+          showPanoToast('拼接失败(HTTP ' + res.status + ')，请重试');
+          stitching.value = false;
+          return;
+        }
         const data = await res.json();
         if (data.error) {
           showPanoToast('拼接失败: ' + data.error);
@@ -380,10 +398,16 @@ window.PanoramaView = {
       formData.append('file', file);
       try {
         const res = await apiFetch('/api/upload', { method: 'POST', body: formData });
+        if (!res.ok) {
+          console.warn('上传平面图失败: HTTP ' + res.status);
+          showPanoToast('平面图上传失败，请重试');
+          e.target.value = '';
+          return;
+        }
         const data = await res.json();
         genFloorPlan.value = data.url;
       } catch (err) {
-        alert('上传失败: ' + err.message);
+        showPanoToast('上传失败: ' + err.message);
       }
       e.target.value = '';
     }
@@ -395,10 +419,16 @@ window.PanoramaView = {
       formData.append('file', file);
       try {
         const res = await apiFetch('/api/upload', { method: 'POST', body: formData });
+        if (!res.ok) {
+          console.warn('上传风格参考图失败: HTTP ' + res.status);
+          showPanoToast('风格参考图上传失败，请重试');
+          e.target.value = '';
+          return;
+        }
         const data = await res.json();
         genStyleRef.value = data.url;
       } catch (err) {
-        alert('上传失败: ' + err.message);
+        showPanoToast('上传失败: ' + err.message);
       }
       e.target.value = '';
     }
@@ -408,23 +438,37 @@ window.PanoramaView = {
       try {
         // 获取平面图 blob
         const planRes = await apiFetch(getImgUrl(genFloorPlan.value));
+        if (!planRes.ok) {
+          console.warn('读取平面图失败: HTTP ' + planRes.status);
+          showPanoToast('读取平面图失败，请重新上传');
+          generating.value = false;
+          return;
+        }
         const planBlob = await planRes.blob();
-        
+
         const formData = new FormData();
         formData.append('floor_plan', planBlob, 'floorplan.jpg');
         formData.append('style_desc', genStyleDesc.value);
-        
+
         // 方案A：直接生成 equirectangular 全景图
-        const controller = new AbortController();
-        abortTimeoutId = setTimeout(() => controller.abort(), 600000); // 10分钟超时
+        // controller 提升到外层变量，组件卸载时（onUnmounted）统一 abort
+        generateController = new AbortController();
+        abortTimeoutId = setTimeout(() => generateController.abort(), 600000); // 10分钟超时
         try {
           const res = await apiFetch('/api/panorama/ai-generate', {
             method: 'POST',
             body: formData,
-            signal: controller.signal,
+            signal: generateController.signal,
           });
           clearTimeout(abortTimeoutId);
           abortTimeoutId = null;
+          generateController = null;
+          if (!res.ok) {
+            console.warn('AI 生成失败: HTTP ' + res.status);
+            showPanoToast('生成失败(HTTP ' + res.status + ')，请重试');
+            generating.value = false;
+            return;
+          }
           const data = await res.json();
           if (data.error) {
             showPanoToast('生成失败: ' + data.error);
@@ -436,6 +480,7 @@ window.PanoramaView = {
         } catch (fetchErr) {
           clearTimeout(abortTimeoutId);
           abortTimeoutId = null;
+          generateController = null;
           if (fetchErr.name === 'AbortError') {
             showPanoToast('生成超时，请重试');
           } else {
@@ -451,11 +496,11 @@ window.PanoramaView = {
     // === 拍照模式 ===
     async function startCamera() {
       try {
-        cameraStream.value = await navigator.mediaDevices.getUserMedia({
+        cameraStream = await navigator.mediaDevices.getUserMedia({
           video: { facingMode: 'environment', width: { ideal: 1024 }, height: { ideal: 1024 } }
         });
         if (cameraVideo.value) {
-          cameraVideo.value.srcObject = cameraStream.value;
+          cameraVideo.value.srcObject = cameraStream;
         }
       } catch (err) {
         showPanoToast('无法访问摄像头: ' + err.message);
@@ -517,6 +562,12 @@ window.PanoramaView = {
           formData.append('files', blob, `${key}.jpg`);
         }
         const res = await apiFetch('/api/panorama/stitch', { method: 'POST', body: formData });
+        if (!res.ok) {
+          console.warn('拼接请求失败: HTTP ' + res.status);
+          showPanoToast('拼接失败(HTTP ' + res.status + ')，请重试');
+          stitching.value = false;
+          return;
+        }
         const data = await res.json();
         if (data.error) {
           showPanoToast('拼接失败: ' + data.error);
@@ -593,9 +644,9 @@ window.PanoramaView = {
       if (activeMode.value === 'camera') {
         nextTick(() => startCamera());
       } else {
-        if (cameraStream.value) {
-          cameraStream.value.getTracks().forEach(t => t.stop());
-          cameraStream.value = null;
+        if (cameraStream) {
+          cameraStream.getTracks().forEach(t => t.stop());
+          cameraStream = null;
         }
       }
     }
@@ -607,6 +658,11 @@ window.PanoramaView = {
     async function loadHistory() {
       try {
         const res = await apiFetch('/api/panorama/history');
+        if (!res.ok) {
+          console.warn('加载历史失败: HTTP ' + res.status);
+          showPanoToast('加载历史记录失败');
+          return;
+        }
         const data = await res.json();
         historyList.value = data.history || [];
       } catch (e) {
@@ -638,8 +694,9 @@ window.PanoramaView = {
     });
     
     onUnmounted(() => {
-      if (cameraStream.value) {
-        cameraStream.value.getTracks().forEach(t => t.stop());
+      if (cameraStream) {
+        cameraStream.getTracks().forEach(t => t.stop());
+        cameraStream = null;
       }
       if (pannellumViewer) {
         pannellumViewer.destroy();
@@ -648,6 +705,11 @@ window.PanoramaView = {
       if (abortTimeoutId) {
         clearTimeout(abortTimeoutId);
         abortTimeoutId = null;
+      }
+      // 取消可能仍在进行的 AI 生成请求，避免卸载后回调写状态
+      if (generateController) {
+        generateController.abort();
+        generateController = null;
       }
     });
     

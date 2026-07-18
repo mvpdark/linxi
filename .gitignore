@@ -69,3 +69,9 @@ alembic.ini
 # ===== 操作系统文件 =====
 .DS_Store
 Thumbs.db
+
+# ===== Capacitor 构建产物 =====
+frontend-capacitor/node_modules/
+frontend-capacitor/android/build/
+frontend-capacitor/android/app/build/
+frontend-capacitor/android/.gradle/

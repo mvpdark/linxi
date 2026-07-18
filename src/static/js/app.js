@@ -4,9 +4,10 @@
  * 组件 ChatView / ImageEditView / PanoramaView 分别在 chat.js / image-edit.js / panorama.js 中定义。
  *
  * 全局 API 配置：
- *   页面加载时从 config.json（与 index.html 同目录，相对路径）读取 { apiBase, token }，
- *   所有 API 请求统一走 apiFetch()（自动拼接 base + Authorization header），
+ *   页面加载时从 config.json（与 index.html 同目录，相对路径）读取 { apiBase }，
+ *   所有 API 请求统一走 apiFetch()（自动拼接 base + JWT Authorization header），
  *   WebSocket 用 getWsUrl()，图片资源用 getImgUrl()。
+ *   多租户模式只认 JWT（AuthManager），config.json 不再下发静态 token。
  */
 var { createApp, ref, reactive, onMounted, onUnmounted } = Vue;
 
@@ -14,10 +15,9 @@ var { createApp, ref, reactive, onMounted, onUnmounted } = Vue;
 // 全局 API 配置
 // ============================================================
 
-/** 运行期配置（config.json 加载失败时回退为同源 + 无 token） */
+/** 运行期配置（config.json 加载失败时回退为同源） */
 window.API_CONFIG = {
   apiBase: '',
-  token: '',
 };
 
 /**
@@ -34,9 +34,6 @@ window.apiConfigReady = (async function loadApiConfig() {
           // 去掉末尾斜杠，避免拼接出双斜杠
           window.API_CONFIG.apiBase = cfg.apiBase.replace(/\/+$/, '');
         }
-        if (typeof cfg.token === 'string') {
-          window.API_CONFIG.token = cfg.token;
-        }
       }
     } else {
       console.warn('config.json 加载失败(HTTP ' + res.status + ')，使用默认同源配置');
@@ -48,35 +45,48 @@ window.apiConfigReady = (async function loadApiConfig() {
 })();
 
 /**
- * 统一 API 请求封装：自动拼接 apiBase + Authorization header。
+ * 统一 API 请求封装：自动拼接 apiBase + Authorization(JWT) header。
+ * 401 统一处理：先 AuthManager.tryRefresh() 刷新并重发原请求一次，
+ * 仍 401 则 AuthManager.logout() 清态并弹登录。
+ * 无 JWT 时不加 Authorization 头（/api/health 等公开接口仍可用）。
  * @param {string} path — 接口路径（如 /api/sessions）；绝对 http(s) URL 原样请求
  * @param {Object} [options] — fetch 选项
+ * @param {boolean} [_retried] — 内部标记：刷新后重试过一次，避免死循环
  * @returns {Promise<Response>}
  */
-window.apiFetch = async function apiFetch(path, options) {
+window.apiFetch = async function apiFetch(path, options, _retried) {
   await window.apiConfigReady;
   options = options || {};
   const headers = Object.assign({}, options.headers || {});
-  if (window.API_CONFIG.token && !headers['Authorization']) {
-    headers['Authorization'] = 'Bearer ' + window.API_CONFIG.token;
+  const jwt = (window.AuthManager && window.AuthManager.getToken && window.AuthManager.getToken()) || '';
+  if (jwt && !headers['Authorization']) {
+    headers['Authorization'] = 'Bearer ' + jwt;
   }
   const url = /^https?:\/\//i.test(path) ? path : window.API_CONFIG.apiBase + path;
-  return fetch(url, Object.assign({}, options, { headers: headers }));
+  const resp = await fetch(url, Object.assign({}, options, { headers: headers }));
+  if (resp.status === 401 && window.AuthManager) {
+    // 先尝试静默刷新并重发一次
+    if (!_retried && window.AuthManager.tryRefresh && (await window.AuthManager.tryRefresh())) {
+      return apiFetch(path, options, true);
+    }
+    // 刷新失败或重试仍 401：清态 + 弹登录
+    if (window.AuthManager.logout) {
+      window.AuthManager.logout();
+    }
+  }
+  return resp;
 };
 
 /**
- * 构建 WebSocket URL：把 apiBase 的 http/https 转成 ws/wss，并附带 token。
+ * 构建 WebSocket URL：把 apiBase 的 http/https 转成 ws/wss。
+ * 鉴权走连接后首帧 {"type":"auth","token":"<jwt>"}（服务端兼容旧 ?token= 查询参数）。
  * @param {string} path — WS 路径（如 /ws/chat）
  * @returns {string}
  */
 window.getWsUrl = function getWsUrl(path) {
   const base = window.API_CONFIG.apiBase || location.origin;
   const wsBase = base.replace(/^http/i, 'ws');
-  let url = wsBase + path;
-  if (window.API_CONFIG.token) {
-    url += (path.indexOf('?') >= 0 ? '&' : '?') + 'token=' + encodeURIComponent(window.API_CONFIG.token);
-  }
-  return url;
+  return wsBase + path;
 };
 
 /**
@@ -89,6 +99,23 @@ window.getImgUrl = function getImgUrl(path) {
   if (!path) return path;
   if (/^(https?:|data:|blob:)/i.test(path)) return path;
   return window.API_CONFIG.apiBase + path;
+};
+
+/**
+ * 全局格式化时间（相对时间），供各视图复用（chat.js 等不再各自实现）。
+ * app.js 在 index.html 中最后加载，但组件 setup 均在其挂载后执行，可安全引用。
+ */
+window.formatTime = function formatTime(timestamp) {
+  if (!timestamp) return '';
+  const now = Date.now();
+  const ts = typeof timestamp === 'number' ? timestamp : Date.parse(timestamp);
+  const diff = now - ts;
+  if (diff < 60000) return '刚刚';
+  if (diff < 3600000) return Math.floor(diff / 60000) + '分钟前';
+  if (diff < 86400000) return Math.floor(diff / 3600000) + '小时前';
+  if (diff < 604800000) return Math.floor(diff / 86400000) + '天前';
+  const d = new Date(ts);
+  return `${d.getMonth() + 1}月${d.getDate()}日`;
 };
 
 // ============================================================
@@ -146,6 +173,10 @@ const app = createApp({
     async function loadSessions() {
       try {
         const res = await apiFetch('/api/sessions');
+        if (!res.ok) {
+          console.warn('加载会话列表失败: HTTP ' + res.status);
+          return;
+        }
         const data = await res.json();
         recentSessions.value = data.sessions || [];
       } catch (e) {
@@ -153,19 +184,8 @@ const app = createApp({
       }
     }
 
-    // === 格式化时间 ===
-    function formatTime(timestamp) {
-      if (!timestamp) return '';
-      const now = Date.now();
-      const ts = typeof timestamp === 'number' ? timestamp : Date.parse(timestamp);
-      const diff = now - ts;
-      if (diff < 60000) return '刚刚';
-      if (diff < 3600000) return Math.floor(diff / 60000) + '分钟前';
-      if (diff < 86400000) return Math.floor(diff / 3600000) + '小时前';
-      if (diff < 604800000) return Math.floor(diff / 86400000) + '天前';
-      const d = new Date(ts);
-      return `${d.getMonth() + 1}月${d.getDate()}日`;
-    }
+    // === 格式化时间（复用全局实现） ===
+    const formatTime = window.formatTime;
 
     function onResize() {
       isDesktop.value = window.innerWidth >= 768;

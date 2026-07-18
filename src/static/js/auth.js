@@ -14,7 +14,8 @@
   "use strict";
 
   // --- 常量 ---
-  var TOKEN_KEY = "lingxi_token";
+  var TOKEN_KEY = "lingxi_token"; // access_token (JWT)
+  var REFRESH_KEY = "lingxi_refresh_token"; // refresh_token
   var USER_KEY = "lingxi_user";
   var AUTH_OVERLAY_ID = "auth-overlay";
   var BALANCE_BAR_ID = "balance-bar";
@@ -34,14 +35,6 @@
     return "";
   }
 
-  // --- 获取旧 token（备用） ---
-  function getLegacyToken() {
-    if (window.API_CONFIG && window.API_CONFIG.token) {
-      return window.API_CONFIG.token;
-    }
-    return null;
-  }
-
   // --- Token 管理 ---
   function getToken() {
     try {
@@ -59,9 +52,30 @@
     }
   }
 
+  function getRefreshToken() {
+    try {
+      return localStorage.getItem(REFRESH_KEY) || null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function setRefreshToken(token) {
+    try {
+      if (token) {
+        localStorage.setItem(REFRESH_KEY, token);
+      } else {
+        localStorage.removeItem(REFRESH_KEY);
+      }
+    } catch (e) {
+      console.warn("[Auth] 无法写入 localStorage", e);
+    }
+  }
+
   function clearToken() {
     try {
       localStorage.removeItem(TOKEN_KEY);
+      localStorage.removeItem(REFRESH_KEY);
       localStorage.removeItem(USER_KEY);
     } catch (e) {
       // 忽略
@@ -86,16 +100,35 @@
     }
   }
 
+  // --- 解码 JWT payload 的 exp（base64url），失败返回 null ---
+  function decodeJwtExp(token) {
+    try {
+      var parts = token.split(".");
+      if (parts.length !== 3) return null;
+      var payload = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+      while (payload.length % 4) payload += "=";
+      var json = JSON.parse(atob(payload));
+      return typeof json.exp === "number" ? json.exp : null;
+    } catch (e) {
+      return null;
+    }
+  }
+
   // --- 检查登录状态 ---
   function isLoggedIn() {
     var token = getToken();
     if (!token) return false;
+    var now = Math.floor(Date.now() / 1000);
+    // 优先直接解析 JWT 自身的 exp（不再依赖本地自存 expires_at）
+    var exp = decodeJwtExp(token);
+    if (exp !== null) {
+      // 过期则视为未登录（不清理 refresh_token，留给 tryRefresh 静默续期）
+      return exp > now;
+    }
+    // 解码失败回退旧逻辑（本地 expires_at）
     var user = getUser();
     if (!user || !user.expires_at) return false;
-    // 检查是否过期
-    var now = Math.floor(Date.now() / 1000);
     if (user.expires_at < now) {
-      clearToken();
       return false;
     }
     return true;
@@ -187,11 +220,15 @@
 
       var data = await resp.json();
 
-      if (data.ok && data.token) {
-        setToken(data.token);
+      if (data.ok && data.access_token) {
+        // 契约：{ok, user_id, username, role, balance, access_token, refresh_token, expires_in}
+        setToken(data.access_token);
+        setRefreshToken(data.refresh_token || "");
         setUser({
           username: data.username,
-          expires_at: data.expires_at,
+          user_id: data.user_id,
+          role: data.role,
+          expires_at: Math.floor(Date.now() / 1000) + (data.expires_in || 0),
           balance: data.balance,
         });
         updateBalanceDisplay(data.balance);
@@ -263,13 +300,9 @@
 
     var apiBase = getApiBase();
     try {
-      var resp = await fetch(apiBase + "/api/billing/summary", {
-        headers: { Authorization: "Bearer " + token },
-      });
+      // fetchWithAuth 自带 401 → 刷新 → 重试；仍 401 时已走 logout 流程
+      var resp = await fetchWithAuth(apiBase + "/api/billing/summary");
       if (resp.status === 401) {
-        // Token 失效
-        clearToken();
-        showLoginOverlay();
         return null;
       }
       var data = await resp.json();
@@ -290,13 +323,10 @@
 
     var apiBase = getApiBase();
     try {
-      var resp = await fetch(apiBase + "/api/billing/charge", {
+      var resp = await fetchWithAuth(apiBase + "/api/billing/charge", {
         method: "POST",
-        headers: { Authorization: "Bearer " + token },
       });
       if (resp.status === 401) {
-        clearToken();
-        showLoginOverlay();
         return null;
       }
       var data = await resp.json();
@@ -310,31 +340,67 @@
     }
   }
 
-  // --- 封装 fetch：自动添加 Authorization ---
-  function fetchWithAuth(url, options) {
+  // --- Token 刷新 ---
+  // 并发去重：多个请求同时 401 时共享同一个刷新 Promise
+  var _refreshing = null;
+
+  /**
+   * 用 refresh_token 换取新的 access_token。
+   * 成功：更新本地 token 并返回 true；失败（含 401）返回 false。
+   */
+  async function tryRefresh() {
+    if (_refreshing) return _refreshing;
+    _refreshing = (async function () {
+      var refreshToken = getRefreshToken();
+      if (!refreshToken) return false;
+      try {
+        var resp = await fetch(getApiBase() + "/api/auth/refresh", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ refresh_token: refreshToken }),
+        });
+        if (!resp.ok) return false;
+        var data = await resp.json();
+        if (data.ok && data.access_token) {
+          setToken(data.access_token);
+          // 同步刷新本地 expires_at 缓存（仅作回退判断用）
+          var user = getUser() || {};
+          user.expires_at = Math.floor(Date.now() / 1000) + (data.expires_in || 0);
+          setUser(user);
+          return true;
+        }
+        return false;
+      } catch (e) {
+        console.warn("[Auth] 刷新 token 失败", e);
+        return false;
+      } finally {
+        _refreshing = null;
+      }
+    })();
+    return _refreshing;
+  }
+
+  // --- 封装 fetch：自动添加 Authorization（仅 JWT；401 先刷新再重试一次） ---
+  async function fetchWithAuth(url, options, _retried) {
     options = options || {};
-    options.headers = options.headers || {};
+    options.headers = Object.assign({}, options.headers || {});
 
     var token = getToken();
     if (token) {
       options.headers["Authorization"] = "Bearer " + token;
-    } else {
-      // 降级：使用旧 API_TOKEN
-      var legacy = getLegacyToken();
-      if (legacy) {
-        options.headers["Authorization"] = "Bearer " + legacy;
-      }
     }
 
-    return fetch(url, options).then(function (resp) {
-      // Token 过期
-      if (resp.status === 401 && token) {
-        clearToken();
-        showLoginOverlay();
-        showToast("登录已过期，请重新登录", "error");
+    var resp = await fetch(url, options);
+    if (resp.status === 401) {
+      if (!_retried && (await tryRefresh())) {
+        // 刷新成功：用新 token 重发原请求一次
+        return fetchWithAuth(url, options, true);
       }
-      return resp;
-    });
+      // 刷新失败或重试仍 401：清态 + 弹登录 + 通知
+      await logout();
+      showToast("登录已过期，请重新登录", "error");
+    }
+    return resp;
   }
 
   // --- 认证状态变化回调 ---
@@ -394,6 +460,21 @@
       }
       // 异步刷新余额
       getBillingSummary();
+    } else if (getRefreshToken()) {
+      // access_token 已过期但 refresh_token 仍在：尝试静默续期，免重新登录
+      tryRefresh().then(function (ok) {
+        if (ok) {
+          hideLoginOverlay();
+          var u = getUser();
+          if (u && u.balance !== undefined) {
+            updateBalanceDisplay(u.balance);
+          }
+          getBillingSummary();
+        } else {
+          clearToken();
+          showLoginOverlay();
+        }
+      });
     } else {
       showLoginOverlay();
     }
@@ -412,6 +493,8 @@
     logout: logout,
     isLoggedIn: isLoggedIn,
     getToken: getToken,
+    getRefreshToken: getRefreshToken,
+    tryRefresh: tryRefresh,
     getUser: getUser,
     fetchWithAuth: fetchWithAuth,
     getBillingSummary: getBillingSummary,
