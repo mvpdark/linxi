@@ -32,6 +32,10 @@ compose.desktop {
     application {
         mainClass = "top.mvpdark.lingxi.desktop.MainKt"
 
+        buildTypes.release.proguard {
+            isEnabled = false
+        }
+
         nativeDistributions {
             targetFormats(TargetFormat.Msi, TargetFormat.Exe)
             packageName = "Lingxi"
