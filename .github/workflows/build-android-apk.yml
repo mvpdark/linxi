@@ -97,25 +97,8 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v1.0.${{ github.run_number }}
-          name: 灵犀 v1.0.${{ github.run_number }}
+          name: v1.0.${{ github.run_number }}
           body: |
-            ## 灵犀 Android APK（Release 完整版）
-
-            **版本**: v1.0.${{ github.run_number }}
-            **构建时间**: ${{ github.event.head_commit.timestamp }}
-            **提交**: ${{ github.sha }}
-
-            ### 下载说明
-            - 点击下方 `lingxi-${{ github.run_number }}.apk` 下载安装包
-            - Release 签名版本，已包含 SAM 2 前端本地分割（EdgeTAM）
-            - 安装时需开启"允许未知来源"
-            - 后端地址: https://lx.mvpdark.top:8443
-
-            ### 最新特性
-            - 用户登录与计费系统（余额熔断）
-            - SAM 2 前端本地分割（EdgeTAM + transformers.js）
-            - 用户面板（余额、历史记录）
-            - Let's Encrypt HTTPS 证书
-            - Cloudflare DDNS 自动同步
+            v1.0.${{ github.run_number }}
           files: lingxi-${{ github.run_number }}.apk
           prerelease: false
