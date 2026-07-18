@@ -30,5 +30,9 @@ val platformModule = module {
             ?: error("AndroidAppContextHolder 未初始化，请在 LingxiApplication.onCreate 中赋值")
         TokenStore(ctx)
     }
-    single { SamService(get<PlatformContext>()) }
+    single {
+        val ctx = AndroidAppContextHolder.context
+            ?: error("AndroidAppContextHolder 未初始化，请在 LingxiApplication.onCreate 中赋值")
+        SamService(ctx)
+    }
 }

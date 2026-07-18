@@ -39,7 +39,7 @@ import javax.imageio.ImageIO
  *
  * @param context 平台上下文（Desktop 为空占位，不使用）
  */
-actual class SamService actual constructor(private val context: PlatformContext) {
+actual class SamService actual constructor(@Suppress("UNUSED_PARAMETER") context: PlatformContext) {
 
     private val env: OrtEnvironment = OrtEnvironment.getEnvironment()
     private var visionSession: OrtSession? = null
@@ -318,14 +318,16 @@ actual class SamService actual constructor(private val context: PlatformContext)
      * 回退到项目开发目录 `desktopApp/resources/`。
      */
     private fun resolveModelsDir(): File {
+        // 优先：Compose Desktop 打包后设置的系统属性
         val resourcesDir = System.getProperty("compose.application.resources.dir")
-        val baseDir = if (resourcesDir != null && File(resourcesDir).exists()) {
-            File(resourcesDir)
-        } else {
-            // 开发回退：项目根目录下的 desktopApp/resources
-            File("desktopApp/resources")
+        if (resourcesDir != null && File(resourcesDir).exists()) {
+            return File(resourcesDir, "models/edgetam")
         }
-        return File(baseDir, "models/edgetam")
+        // 回退 1：开发时项目根目录下的 desktopApp/resources
+        val devDir = File("desktopApp/resources/models/edgetam")
+        if (devDir.exists()) return devDir
+        // 回退 2：用户主目录下的 .lingxi/models/edgetam
+        return File(System.getProperty("user.home"), ".lingxi/models/edgetam")
     }
 
     /**

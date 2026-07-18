@@ -118,6 +118,7 @@ object MaskPostProcessor {
             result = result.filterIndexed { i, _ -> i % step == 0 }
             if (result.size > maxPoints) result = result.take(maxPoints)
         }
+        if (result.size < 3) return null
 
         // 6. 归一化到 0-1
         val w = width.toFloat()

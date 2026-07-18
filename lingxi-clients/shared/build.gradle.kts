@@ -67,6 +67,8 @@ kotlin {
             implementation(libs.ktor.client.okhttp)
             implementation(libs.datastore.preferences)
             implementation(libs.onnxruntime.android)
+            // rememberLauncherForActivityResult + ActivityResultContracts 需要 activity-compose
+            implementation(libs.androidx.activity.compose)
         }
 
         val desktopMain by getting {

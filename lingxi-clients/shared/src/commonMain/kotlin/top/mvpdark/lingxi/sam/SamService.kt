@@ -12,7 +12,7 @@ import top.mvpdark.lingxi.data.model.Bbox
  */
 data class SamSegmentResult(
     val success: Boolean,
-    val objects: List<SamObject>,
+    val objects: List<SamObject> = emptyList(),
     val error: String = "",
 )
 

@@ -71,6 +71,7 @@ import org.koin.compose.viewmodel.koinViewModel
 import top.mvpdark.lingxi.data.model.DetectedObject
 import top.mvpdark.lingxi.ui.imageedit.ImageEditUiState
 import top.mvpdark.lingxi.ui.imageedit.ImageEditViewModel
+import top.mvpdark.lingxi.ui.imageedit.rememberImagePickerLauncher
 
 // 对齐 image-edit.js 的 Konva 颜色常量
 private val AnnotationRed = Color(0xFFFA5151)
@@ -87,19 +88,20 @@ private val AnnotationBlue = Color(0xFF2563EB)
  * - Generating：显示加载动画 "AI 正在生成..."
  * - Result：显示结果图 + 继续编辑 / 重新编辑 / 重新开始按钮
  *
- * 文件选择器通过 [onPickImage] 回调由平台层提供，选好图片后调用
+ * 文件选择器通过 [rememberImagePickerLauncher] 由各平台实现，选好图片后调用
  * [ImageEditViewModel.onPickImage] 传入字节流。
  *
  * @param viewModel 图像编辑 ViewModel（Koin 注入）。
- * @param onPickImage 选择图片回调（由各平台实现文件选择器）。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ImageEditScreen(
     viewModel: ImageEditViewModel = koinViewModel(),
-    onPickImage: () -> Unit = {},
 ) {
     val state by viewModel.uiState.collectAsState()
+    val launchPicker = rememberImagePickerLauncher { bytes ->
+        if (bytes != null) viewModel.onPickImage(bytes)
+    }
 
     Scaffold(
         topBar = {
@@ -129,7 +131,7 @@ fun ImageEditScreen(
             when (state.step) {
                 ImageEditViewModel.Step.Upload -> UploadContent(
                     error = state.error,
-                    onPickImage = onPickImage,
+                    onPickImage = launchPicker,
                 )
 
                 ImageEditViewModel.Step.Analyzing -> LoadingContent(

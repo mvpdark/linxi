@@ -80,95 +80,117 @@ class ImageEditViewModel(
      * @param bytes 原始图片字节流
      */
     fun onPickImage(bytes: ByteArray) {
+        // 重入保护：正在处理中时不接受新图片
+        val currentStep = _uiState.value.step
+        if (currentStep == Step.Analyzing || currentStep == Step.Segmenting || currentStep == Step.Generating) {
+            return
+        }
+
         viewModelScope.launch {
-            _uiState.update {
-                it.copy(
-                    step = Step.Analyzing,
-                    originalBytes = bytes,
-                    error = null,
-                )
-            }
-
-            // 并行：上传 + VLM 检测
-            val (uploadResult, detectResult) = coroutineScope {
-                val uploadDeferred = async { repository.uploadImage(bytes, "image.jpg") }
-                val detectDeferred = async { repository.vlmDetect(bytes, "image.jpg") }
-                uploadDeferred.await() to detectDeferred.await()
-            }
-
-            val displayUrl = if (uploadResult.success) uploadResult.image else null
-            val detectedObjects = if (detectResult.success) {
-                detectResult.objects.mapIndexed { idx, obj ->
-                    DetectedObject(
-                        id = obj.id ?: idx,
-                        label = obj.label,
-                        bbox = obj.bbox ?: Bbox(0f, 0f, 0f, 0f),
+            try {
+                _uiState.update {
+                    it.copy(
+                        step = Step.Analyzing,
+                        originalBytes = bytes,
+                        error = null,
+                        samProgress = 0,
                     )
                 }
-            } else {
-                emptyList()
-            }
 
-            if (displayUrl == null) {
+                // 并行：上传 + VLM 检测
+                val (uploadResult, detectResult) = coroutineScope {
+                    val uploadDeferred = async { repository.uploadImage(bytes, "image.jpg") }
+                    val detectDeferred = async { repository.vlmDetect(bytes, "image.jpg") }
+                    uploadDeferred.await() to detectDeferred.await()
+                }
+
+                val displayUrl = if (uploadResult.success) uploadResult.image else null
+                val detectedObjects = if (detectResult.success) {
+                    detectResult.objects.mapIndexed { idx, obj ->
+                        DetectedObject(
+                            id = obj.id ?: idx,
+                            label = obj.label,
+                            bbox = obj.bbox ?: Bbox(0f, 0f, 0f, 0f),
+                        )
+                    }
+                } else {
+                    emptyList()
+                }
+
+                if (displayUrl == null) {
+                    _uiState.update {
+                        it.copy(
+                            step = Step.Upload,
+                            error = uploadResult.error.ifEmpty { "图片上传失败" },
+                        )
+                    }
+                    return@launch
+                }
+
+                _uiState.update {
+                    it.copy(
+                        imageDisplayUrl = displayUrl,
+                        objects = detectedObjects,
+                    )
+                }
+
+                // 如果有检测到物体，跑 SAM 分割
+                if (detectedObjects.isNotEmpty()) {
+                    _uiState.update {
+                        it.copy(step = Step.Segmenting, samLoading = true)
+                    }
+
+                    // 加载 SAM 模型（如果未加载），用 runCatching 防止加载失败阻塞流程
+                    if (!samService.isReady) {
+                        runCatching {
+                            samService.loadModel { progress, _ ->
+                                _uiState.update { it.copy(samProgress = progress) }
+                            }
+                        }.onFailure { e ->
+                            println("[ImageEditViewModel] SAM loadModel failed: ${e.message}")
+                        }
+                    }
+
+                    // 执行分割，失败时回退 bbox 模式
+                    val samResult = runCatching {
+                        samService.segment(bytes, detectedObjects.map { it.id to it.bbox })
+                    }.getOrNull()
+
+                    if (samResult != null && samResult.success) {
+                        // 用 polygon 更新 objects
+                        val updatedObjects = detectedObjects.map { obj ->
+                            val samObj = samResult.objects.find { it.id == obj.id }
+                            if (samObj != null) {
+                                obj.copy(
+                                    polygon = samObj.polygon?.map { listOf(it.first, it.second) },
+                                    maskPngB64 = samObj.maskPngB64,
+                                )
+                            } else {
+                                obj
+                            }
+                        }
+                        _uiState.update {
+                            it.copy(objects = updatedObjects, samLoading = false, samProgress = 0)
+                        }
+                    } else {
+                        // SAM 失败，回退 bbox 模式
+                        _uiState.update { it.copy(samLoading = false, samProgress = 0) }
+                    }
+                }
+
+                _uiState.update { it.copy(step = Step.Edit) }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Throwable) {
                 _uiState.update {
                     it.copy(
                         step = Step.Upload,
-                        error = uploadResult.error.ifEmpty { "图片上传失败" },
+                        samLoading = false,
+                        samProgress = 0,
+                        error = e.message ?: "图片处理失败",
                     )
                 }
-                return@launch
             }
-
-            _uiState.update {
-                it.copy(
-                    imageDisplayUrl = displayUrl,
-                    objects = detectedObjects,
-                )
-            }
-
-            // 如果有检测到物体，跑 SAM 分割
-            if (detectedObjects.isNotEmpty()) {
-                _uiState.update {
-                    it.copy(step = Step.Segmenting, samLoading = true)
-                }
-
-                // 加载 SAM 模型（如果未加载），用 runCatching 防止加载失败阻塞流程
-                if (!samService.isReady) {
-                    runCatching {
-                        samService.loadModel { progress, _ ->
-                            _uiState.update { it.copy(samProgress = progress) }
-                        }
-                    }
-                }
-
-                // 执行分割，失败时回退 bbox 模式
-                val samResult = runCatching {
-                    samService.segment(bytes, detectedObjects.map { it.id to it.bbox })
-                }.getOrNull()
-
-                if (samResult != null && samResult.success) {
-                    // 用 polygon 更新 objects
-                    val updatedObjects = detectedObjects.map { obj ->
-                        val samObj = samResult.objects.find { it.id == obj.id }
-                        if (samObj != null) {
-                            obj.copy(
-                                polygon = samObj.polygon?.map { listOf(it.first, it.second) },
-                                maskPngB64 = samObj.maskPngB64,
-                            )
-                        } else {
-                            obj
-                        }
-                    }
-                    _uiState.update {
-                        it.copy(objects = updatedObjects, samLoading = false)
-                    }
-                } else {
-                    // SAM 失败，回退 bbox 模式
-                    _uiState.update { it.copy(samLoading = false) }
-                }
-            }
-
-            _uiState.update { it.copy(step = Step.Edit) }
         }
     }
 

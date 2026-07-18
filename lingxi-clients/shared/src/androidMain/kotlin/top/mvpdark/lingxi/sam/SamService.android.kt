@@ -284,8 +284,8 @@ actual class SamService actual constructor(private val context: PlatformContext)
     }
 
     actual fun close() {
-        visionSession?.close()
-        decoderSession?.close()
+        runCatching { visionSession?.close() }
+        runCatching { decoderSession?.close() }
         visionSession = null
         decoderSession = null
         isReady = false
