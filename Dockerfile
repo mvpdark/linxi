@@ -48,7 +48,8 @@ COPY alembic/ /app/alembic/
 COPY alembic.ini /app/alembic.ini
 
 # 3) 将 sam2 包暴露到 import 路径（/api/sam-segment 延迟导入时才需要）
-ENV PYTHONPATH=/app/src/sam2_src
+#    同时包含 /app/src，使 server.py 的 `from utils.xxx import` 能正确解析
+ENV PYTHONPATH=/app/src:/app/src/sam2_src
 
 # 4) 运行期目录（server.py 导入时会 mkdir static/assets；非 root 运行需预先授权）
 RUN mkdir -p /app/assets /app/src/static/css /app/src/static/js /app/src/checkpoints \
