@@ -119,6 +119,9 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    defaults:
+      run:
+        working-directory: ${{ github.workspace }}
     steps:
       - uses: actions/checkout@v4
 
@@ -131,22 +134,45 @@ jobs:
       - name: Prepare release assets
         run: |
           mkdir -p release-assets
-          # 重命名 APK
-          find artifacts/lingxi-android-debug -name "*.apk" -exec cp {} release-assets/lingxi-android-debug.apk \;
-          # 重命名 MSI
-          find artifacts/lingxi-desktop-msi -name "*.msi" -exec cp {} release-assets/lingxi-desktop.msi \;
-          # 重命名 EXE
-          find artifacts/lingxi-desktop-exe -name "*.exe" -exec cp {} release-assets/lingxi-desktop-portable.exe \;
+
+          # 复制并重命名 APK (debug)
+          if [ -d artifacts/lingxi-android-debug ]; then
+            cp artifacts/lingxi-android-debug/*.apk release-assets/lingxi-android-debug.apk 2>/dev/null && echo "✓ Debug APK" || echo "✗ No APK in lingxi-android-debug"
+          else
+            echo "✗ artifacts/lingxi-android-debug not found"
+          fi
+
+          # 复制并重命名 MSI
+          if [ -d artifacts/lingxi-desktop-msi ]; then
+            cp artifacts/lingxi-desktop-msi/*.msi release-assets/lingxi-desktop.msi 2>/dev/null && echo "✓ Desktop MSI" || echo "✗ No MSI in lingxi-desktop-msi"
+          else
+            echo "✗ artifacts/lingxi-desktop-msi not found"
+          fi
+
+          # 复制并重命名 EXE
+          if [ -d artifacts/lingxi-desktop-exe ]; then
+            cp artifacts/lingxi-desktop-exe/*.exe release-assets/lingxi-desktop-portable.exe 2>/dev/null && echo "✓ Desktop EXE" || echo "✗ No EXE in lingxi-desktop-exe"
+          else
+            echo "✗ artifacts/lingxi-desktop-exe not found"
+          fi
+
           # 如果有 Release APK 也加上
           if [ -d artifacts/lingxi-android-release ]; then
-            find artifacts/lingxi-android-release -name "*.apk" -exec cp {} release-assets/lingxi-android-release.apk \;
+            cp artifacts/lingxi-android-release/*.apk release-assets/lingxi-android-release.apk 2>/dev/null && echo "✓ Release APK" || true
           fi
+
+          echo "=== Release assets ==="
           ls -la release-assets/
+
+          # 验证至少有一个文件
+          if [ -z "$(ls -A release-assets/ 2>/dev/null)" ]; then
+            echo "ERROR: No release assets found!"
+            exit 1
+          fi
 
       - name: Generate release tag
         id: tag
         run: |
-          # 生成版本号: v1.0.0-dev.YYYYMMDD.SHORT_SHA
           DATE=$(date -u +%Y%m%d)
           SHORT_SHA=${GITHUB_SHA::7}
           TAG="v1.0.0-dev.${DATE}.${SHORT_SHA}"
