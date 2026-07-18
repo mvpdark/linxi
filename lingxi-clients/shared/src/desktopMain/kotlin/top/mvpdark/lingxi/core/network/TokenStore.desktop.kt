@@ -7,7 +7,7 @@ import java.util.prefs.Preferences
  *
  * @param context Desktop 平台上下文（空占位，未使用）。
  */
-actual class TokenStore(context: PlatformContext) {
+actual class TokenStore actual constructor(context: PlatformContext) {
 
     private val prefs: Preferences = Preferences.userRoot().node("top/mvpdark/lingxi")
 

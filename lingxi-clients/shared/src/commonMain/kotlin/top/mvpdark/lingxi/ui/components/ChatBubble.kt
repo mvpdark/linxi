@@ -16,7 +16,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -62,10 +64,10 @@ fun ChatBubble(
                 modifier = Modifier
                     .clip(RoundedCornerShape(20.dp))
                     .background(
-                        if (isUser) {
+                        brush = if (isUser) {
                             userBubbleBrush(isDark)
                         } else {
-                            if (isDark) Color(0xFF2E2E2C) else AiBubble
+                            SolidColor(if (isDark) Color(0xFF2E2E2C) else AiBubble)
                         }
                     )
                     .padding(horizontal = 14.dp, vertical = 10.dp),

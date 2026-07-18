@@ -51,7 +51,8 @@ class ChatViewModel(
     fun loadSessions() {
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, error = null) }
-            runCatching { chatRepository.getSessions() }
+            val result: Result<List<ChatSession>> = runCatching { chatRepository.getSessions() }
+            result
                 .onSuccess { list ->
                     _uiState.update {
                         it.copy(sessions = list, isLoading = false)
@@ -72,7 +73,8 @@ class ChatViewModel(
     ) {
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, error = null) }
-            runCatching { chatRepository.createSession(title) }
+            val result: Result<ChatSession> = runCatching { chatRepository.createSession(title) }
+            result
                 .onSuccess { session ->
                     _uiState.update {
                         it.copy(
@@ -105,7 +107,8 @@ class ChatViewModel(
                     error = null,
                 )
             }
-            runCatching { chatRepository.getHistory(sessionId) }
+            val result: Result<List<ChatMessage>> = runCatching { chatRepository.getHistory(sessionId) }
+            result
                 .onSuccess { history ->
                     _uiState.update { it.copy(messages = history) }
                 }
@@ -151,14 +154,16 @@ class ChatViewModel(
 
         viewModelScope.launch {
             // 确保有会话（异步创建，避免阻塞主线程）
-            val sessionId = _uiState.value.currentSessionId.ifBlank {
-                runCatching { chatRepository.createSession("新对话") }
-                    .onSuccess { session ->
-                        _uiState.update {
-                            it.copy(sessions = listOf(session) + it.sessions)
-                        }
+            var sessionId: String? = _uiState.value.currentSessionId.ifBlank { null }
+            if (sessionId.isNullOrBlank()) {
+                val createResult: Result<ChatSession> = runCatching { chatRepository.createSession("新对话") }
+                val newSession = createResult.getOrNull()
+                if (newSession != null) {
+                    _uiState.update {
+                        it.copy(sessions = listOf(newSession) + it.sessions)
                     }
-                    .getOrNull()?.id
+                    sessionId = newSession.id
+                }
             }
             if (sessionId.isNullOrBlank()) {
                 _uiState.update {
@@ -171,10 +176,12 @@ class ChatViewModel(
                 return@launch
             }
 
+            val currentSessionId = sessionId!!
+
             // 追加用户消息到列表
             val userMessage = ChatMessage(
                 id = "local_${currentTimeMillis()}",
-                sessionId = sessionId,
+                sessionId = currentSessionId,
                 role = "user",
                 content = pendingText,
                 images = if (pendingImage.isNotEmpty()) listOf(pendingImage) else emptyList(),
@@ -182,15 +189,15 @@ class ChatViewModel(
             )
             _uiState.update {
                 it.copy(
-                    currentSessionId = sessionId,
+                    currentSessionId = currentSessionId,
                     messages = it.messages + userMessage,
                 )
             }
 
             // 流式接收 AgentEvent
-            chatRepository.sendMessageStream(sessionId, pendingText, pendingImage)
-                .collect { event ->
-                    handleAgentEvent(sessionId, event)
+            chatRepository.sendMessageStream(currentSessionId, pendingText, pendingImage)
+                .collect { event: AgentEvent ->
+                    handleAgentEvent(currentSessionId, event)
                 }
             _uiState.update { it.copy(isSending = false, agentStatus = null) }
         }
@@ -286,12 +293,12 @@ class ChatViewModel(
     /** 删除会话。 */
     fun deleteSession(sessionId: String) {
         viewModelScope.launch {
-            runCatching { chatRepository.deleteSession(sessionId) }
-                .onSuccess {
-                    _uiState.update {
-                        it.copy(sessions = it.sessions.filterNot { s -> s.id == sessionId })
-                    }
+            val result: Result<Unit> = runCatching { chatRepository.deleteSession(sessionId) }
+            result.onSuccess {
+                _uiState.update {
+                    it.copy(sessions = it.sessions.filterNot { s -> s.id == sessionId })
                 }
+            }
         }
     }
 }
