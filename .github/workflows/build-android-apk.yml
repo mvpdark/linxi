@@ -12,6 +12,8 @@ on:
 jobs:
   build-apk:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
@@ -20,7 +22,7 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Setup Java JDK 17
+      - name: Setup Java JDK 21
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
@@ -46,9 +48,39 @@ jobs:
           chmod +x gradlew
           ./gradlew assembleDebug --no-daemon
 
+      - name: Rename APK with version
+        run: |
+          cp frontend-capacitor/android/app/build/outputs/apk/debug/app-debug.apk \
+             lingxi-${{ github.run_number }}-debug.apk
+
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: lingxi-debug-apk
           path: frontend-capacitor/android/app/build/outputs/apk/debug/*.apk
           retention-days: 30
+
+      - name: Create Tag and Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.${{ github.run_number }}
+          name: 灵犀 v1.0.${{ github.run_number }}
+          body: |
+            ## 灵犀 Android APK
+
+            **版本**: v1.0.${{ github.run_number }}
+            **构建时间**: ${{ github.event.head_commit.timestamp }}
+            **提交**: ${{ github.sha }}
+
+            ### 下载说明
+            - 点击下方 `lingxi-${{ github.run_number }}-debug.apk` 下载安装包
+            - 这是 Debug 版本，安装时需开启"允许未知来源"
+            - 后端地址: https://lx.mvpdark.top:8443
+
+            ### 最新特性
+            - 用户登录与计费系统
+            - Let's Encrypt HTTPS 证书
+            - Cloudflare DDNS 自动同步
+            - 灵犀图标 (Resonant Silence 设计)
+          files: lingxi-${{ github.run_number }}-debug.apk
+          prerelease: false
