@@ -302,6 +302,23 @@ window.ImageEditView = {
     }
 
     /**
+     * data URL 转 Blob（兼容 Android WebView，不使用 fetch）
+     */
+    function dataUrlToBlob(dataUrl) {
+      const parts = dataUrl.split(',');
+      const meta = parts[0];
+      const base64 = parts[1] || '';
+      const mimeMatch = meta.match(/data:([^;]+)/);
+      const mime = mimeMatch ? mimeMatch[1] : 'image/jpeg';
+      const bytes = atob(base64);
+      const arr = new Uint8Array(bytes.length);
+      for (let i = 0; i < bytes.length; i++) {
+        arr[i] = bytes.charCodeAt(i);
+      }
+      return new Blob([arr], { type: mime });
+    }
+
+    /**
      * 调用 VLM 物体检测 API。
      * @param {File} file — 图片文件
      * @returns {Promise<{objects: Array}>}
@@ -1068,8 +1085,7 @@ window.ImageEditView = {
           if (window.ImageStore && window.ImageStore.isImageId(imageUrl.value)) {
             const dataUrl = await window.ImageStore.getImageDataUrl(imageUrl.value);
             if (dataUrl) {
-              const resp = await fetch(dataUrl);
-              fileToSend = await resp.blob();
+              fileToSend = dataUrlToBlob(dataUrl);
             }
           } else {
             // 兼容旧 URL：从后端获取
@@ -1251,8 +1267,7 @@ window.ImageEditView = {
         if (window.ImageStore && window.ImageStore.isImageId(resultUrl.value)) {
           const dataUrl = await window.ImageStore.getImageDataUrl(resultUrl.value);
           if (!dataUrl) throw new Error('结果图已失效，请重新生成');
-          const resp = await fetch(dataUrl);
-          blob = await resp.blob();
+          blob = dataUrlToBlob(dataUrl);
         } else {
           // 兼容旧 URL
           const response = await fetchWithTimeout(getImgUrl(resultUrl.value));

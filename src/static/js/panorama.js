@@ -497,8 +497,8 @@ window.PanoramaView = {
             generating.value = false;
             return;
           }
-          const resp = await fetch(dataUrl);
-          planBlob = await resp.blob();
+          // Android WebView 中 fetch(dataUrl) 有兼容性问题，改用 atob 解码
+          planBlob = dataUrlToBlob(dataUrl);
         } else {
           const planRes = await apiFetch(getImgUrl(genFloorPlan.value));
           if (!planRes.ok) {
@@ -866,6 +866,23 @@ window.PanoramaView = {
       if (diff < 86400) return Math.floor(diff / 3600) + '小时前';
       const d = new Date(ts * 1000);
       return (d.getMonth() + 1) + '月' + d.getDate() + '日';
+    }
+
+    /**
+     * data URL 转 Blob（兼容 Android WebView，不使用 fetch）
+     */
+    function dataUrlToBlob(dataUrl) {
+      const parts = dataUrl.split(',');
+      const meta = parts[0];
+      const base64 = parts[1] || '';
+      const mimeMatch = meta.match(/data:([^;]+)/);
+      const mime = mimeMatch ? mimeMatch[1] : 'image/jpeg';
+      const bytes = atob(base64);
+      const arr = new Uint8Array(bytes.length);
+      for (let i = 0; i < bytes.length; i++) {
+        arr[i] = bytes.charCodeAt(i);
+      }
+      return new Blob([arr], { type: mime });
     }
     
     async function viewHistory(item) {
