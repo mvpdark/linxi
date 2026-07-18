@@ -1,0 +1,46 @@
+<!--
+  灵犀启动图标（Vector Drawable）。
+  鼠尾草绿圆角背景 + 白色猫脸（团团），对应 AI 助手角色。
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- 背景：鼠尾草绿圆角方块 -->
+    <path
+        android:fillColor="#7A9B7A"
+        android:pathData="M8,0 L100,0 A8,8 0 0 1 108,8 L108,100 A8,8 0 0 1 100,108 L8,108 A8,8 0 0 1 0,100 L0,8 A8,8 0 0 1 8,0 Z" />
+
+    <!-- 左耳 -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M40,34 L47,18 L54,34 Z" />
+
+    <!-- 右耳 -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,34 L61,18 L68,34 Z" />
+
+    <!-- 头部圆 -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,62 m-18,0 a18,18 0 1,0 36,0 a18,18 0 1,0 -36,0" />
+
+    <!-- 左眼 -->
+    <path
+        android:fillColor="#5C7A5C"
+        android:pathData="M47,58 m-2.5,0 a2.5,2.5 0 1,0 5,0 a2.5,2.5 0 1,0 -5,0" />
+
+    <!-- 右眼 -->
+    <path
+        android:fillColor="#5C7A5C"
+        android:pathData="M61,58 m-2.5,0 a2.5,2.5 0 1,0 5,0 a2.5,2.5 0 1,0 -5,0" />
+
+    <!-- 鼻子 -->
+    <path
+        android:fillColor="#7A9B7A"
+        android:pathData="M54,64 m-2,0 a2,2 0 1,0 4,0 a2,2 0 1,0 -4,0" />
+
+</vector>
