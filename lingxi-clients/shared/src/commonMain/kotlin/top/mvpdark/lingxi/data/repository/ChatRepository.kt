@@ -26,7 +26,7 @@ import top.mvpdark.lingxi.data.model.HistoryResponse
 import top.mvpdark.lingxi.data.model.SessionListResponse
 
 /**
- * 聊天仓库：封装 /api/sessions/* 与 WebSocket /ws/chat 接口。
+ * 聊天仓库：封装 /api/sessions/ 与 WebSocket /ws/chat 接口。
  *
  * 流式消息通过 [sendMessageStream] 返回 [Flow]<[AgentEvent]>，UI 逐帧消费。
  */

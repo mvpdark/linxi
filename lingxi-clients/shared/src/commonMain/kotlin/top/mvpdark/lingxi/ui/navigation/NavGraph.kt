@@ -82,8 +82,7 @@ fun NavGraph() {
                 navArgument(Routes.SESSION_ID_ARG) { type = NavType.StringType },
             ),
         ) { backStackEntry ->
-            val args = backStackEntry.arguments
-            val sessionId: String = args?.get<String>(Routes.SESSION_ID_ARG) ?: ""
+            val sessionId = backStackEntry.arguments?.getString(Routes.SESSION_ID_ARG) ?: ""
             ChatScreen(sessionId = sessionId)
         }
 

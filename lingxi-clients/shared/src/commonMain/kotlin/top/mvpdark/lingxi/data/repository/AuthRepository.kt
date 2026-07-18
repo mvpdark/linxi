@@ -13,7 +13,7 @@ import top.mvpdark.lingxi.data.model.MeResponse
 import top.mvpdark.lingxi.data.model.RegisterRequest
 
 /**
- * 认证仓库：封装 /api/auth/* 接口。
+ * 认证仓库：封装 /api/auth/ 接口。
  */
 class AuthRepository(
     private val apiClient: ApiClient,
