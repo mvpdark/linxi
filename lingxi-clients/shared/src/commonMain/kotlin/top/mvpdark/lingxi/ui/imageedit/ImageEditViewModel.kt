@@ -72,7 +72,7 @@ class ImageEditViewModel(
     val uiState: StateFlow<ImageEditUiState> = _uiState.asStateFlow()
 
     /** 重入保护：防止 onPickImage / startEdit 被并发调用导致状态错乱。 */
-    private val isProcessing = kotlin.concurrent.AtomicBoolean(false)
+    private val isProcessing = MutableStateFlow(false)
 
     /**
      * 用户选图后调用：上传 → VLM 检测 → SAM 分割 → 进入编辑模式。
@@ -88,7 +88,7 @@ class ImageEditViewModel(
         // 二次检查：正在处理中的步骤不接受新图片
         val currentStep = _uiState.value.step
         if (currentStep == Step.Analyzing || currentStep == Step.Segmenting || currentStep == Step.Generating) {
-            isProcessing.set(false)
+            isProcessing.value = false
             return
         }
 
@@ -197,7 +197,7 @@ class ImageEditViewModel(
                     )
                 }
             } finally {
-                isProcessing.set(false)
+                isProcessing.value = false
             }
         }
     }
@@ -245,7 +245,7 @@ class ImageEditViewModel(
         val state = _uiState.value
         val bytes = state.originalBytes
         if (bytes == null) {
-            isProcessing.set(false)
+            isProcessing.value = false
             return
         }
 
@@ -284,7 +284,7 @@ class ImageEditViewModel(
                     }
                 }
             } finally {
-                isProcessing.set(false)
+                isProcessing.value = false
             }
         }
     }
