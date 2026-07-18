@@ -21,7 +21,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.AutoAwesome
-import androidx.compose.material.icons.filled.Logout
+import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.Panorama
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material3.Card
@@ -105,7 +105,7 @@ fun HomeScreen(
                         authViewModel.logout()
                         onLoggedOut()
                     }) {
-                        Icon(Icons.Default.Logout, contentDescription = "退出登录")
+                        Icon(Icons.AutoMirrored.Filled.Logout, contentDescription = "退出登录")
                     }
                 },
             )

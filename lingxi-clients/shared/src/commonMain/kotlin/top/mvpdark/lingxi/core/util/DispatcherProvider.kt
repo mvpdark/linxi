@@ -23,13 +23,13 @@ interface DispatcherProvider {
 /**
  * 默认实现，直接映射到 [Dispatchers]。
  *
- * 当前项目目标平台为 Android 与 Desktop(JVM)：
- * - Android 端通过 AndroidX 依赖间接引入 `kotlinx-coroutines-android`，提供 [Dispatchers.Main]；
- * - Desktop 端通过 `kotlinx-coroutines-swing`，将 [Dispatchers.Main] 绑定到 Swing EDT。
- * 因此在 commonMain 中引用 [Dispatchers.Main] / [Dispatchers.IO] 可正常编译与运行。
+ * 注意：[Dispatchers.IO] 是 JVM 平台特有的，在 commonMain 中不可用。
+ * 此处使用 [Dispatchers.Default] 作为 IO 调度器的替代。
+ * [Dispatchers.Main] 在 commonMain 中作为 expect 声明可用，
+ * Android 端通过 AndroidX 依赖提供实现，Desktop 端通过 `kotlinx-coroutines-swing` 绑定到 Swing EDT。
  */
 class DefaultDispatcherProvider : DispatcherProvider {
-    override val io: CoroutineDispatcher = Dispatchers.IO
+    override val io: CoroutineDispatcher = Dispatchers.Default
     override val main: CoroutineDispatcher = Dispatchers.Main
     override val default: CoroutineDispatcher = Dispatchers.Default
 }
