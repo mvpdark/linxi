@@ -1,0 +1,52 @@
+# 与 backend/.dockerignore 内容一致。
+# BuildKit（Docker 20.10+ 默认）构建时会自动识别 Dockerfile 同目录下的本文件，
+# 路径相对于构建上下文根（项目根目录）。修改规则时请同步维护两个文件。
+
+# -- 版本控制 / IDE --
+.git
+.gitignore
+.trae/
+.vscode/
+.idea/
+
+# -- Python 缓存 --
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+**/.pytest_cache/
+
+# -- 运行期数据（通过 volume 挂载提供，不打入镜像） --
+cache/
+assets/uploads/
+assets/upload_*
+assets/generated_*
+assets/mask_*
+assets/panorama_*
+assets/design_refs/
+assets/panorama_test/
+
+# -- SAM2 模型权重（约 150MB，启动时自动下载或 volume 挂载） --
+src/checkpoints/*.pt
+
+# -- sam2_src：仅保留 sam2/ 包 --
+src/sam2_src/demo/
+src/sam2_src/notebooks/
+src/sam2_src/sav_dataset/
+src/sam2_src/tools/
+src/sam2_src/training/
+src/sam2_src/assets/
+src/sam2_src/.github/
+src/sam2_src/checkpoints/
+
+# -- 敏感配置（含 API Key，严禁打入镜像） --
+config.yaml
+.env
+
+# -- 部署目录自身 / 文档 / 测试截图等根目录杂物 --
+backend/
+screenshots/
+docs/
+design/
+/*.png
+/*.md
+/pyproject.toml

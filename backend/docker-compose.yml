@@ -1,0 +1,61 @@
+# ===========================================================================
+# 灵犀后端编排（Compose v2，无需 version 字段）
+#
+# 用法：
+#   cd backend
+#   docker compose up -d --build        # 构建并后台启动
+#   docker compose logs -f app          # 查看日志
+#   docker compose down                 # 停止并移除容器（volume 数据保留）
+#
+# 环境变量可在 backend/.env 中设置（compose 自动读取），或直接在 shell 导出。
+# ===========================================================================
+
+services:
+  app:
+    build:
+      context: ..                     # 构建上下文 = 项目根目录
+      dockerfile: backend/Dockerfile
+    image: lingxi-backend:latest
+    container_name: lingxi-backend
+    ports:
+      - "8765:8765"
+
+    environment:
+      # -- LLM 对话 API（yunwu，支持逗号分隔多个 key 轮询） --
+      LLM_API_BASE: ${LLM_API_BASE:-https://yunwu.ai}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_MODEL: ${LLM_MODEL:-gpt-5.6-luna}
+      # -- 图片生成 API（yunwu，支持逗号分隔多个 key 轮询） --
+      IMAGE_API_BASE: ${IMAGE_API_BASE:-https://yunwu.ai}
+      IMAGE_API_KEY: ${IMAGE_API_KEY:-}
+      IMAGE_MODEL: ${IMAGE_MODEL:-gpt-image-2}
+      # -- Tavily 搜索 Key（支持逗号分隔多个） --
+      TAVILY_API_KEY: ${TAVILY_API_KEY:-}
+      # -- SAM2 权重缺失时自动下载；置 0 则改为下方挂载本地权重 --
+      SAM2_DOWNLOAD_CKPT: ${SAM2_DOWNLOAD_CKPT:-1}
+      # -- 图片资源目录（默认即 /app/assets，可覆盖） --
+      ASSETS_DIR: /app/assets
+      # -- 旧版 API Token（无登录客户端的降级鉴权，可改） --
+      API_TOKEN: ${API_TOKEN:-lingxi-secret-2026}
+      # -- 计费比例（yunwu 1 美元 = N 元人民币，默认 2.0） --
+      # 当前 RATE 在代码中硬编码为 2.0，如需修改请改 BillingService.RATE
+      # -- 账户与计费数据自动持久化到 ../cache/storage/（auth/ + billing/） --
+
+    volumes:
+      # 上传 / 生成的图片（同时含前端引用的字体、emoji 等静态资源）
+      - ../assets:/app/assets
+      # 会话存储、记忆摘要、搜索用量等运行期数据
+      - ../cache:/app/cache
+      # SAM2 权重持久化：首次启动自动下载后缓存于此，重建容器不重复下载
+      - sam2-checkpoints:/app/src/checkpoints
+      # 【可选】改用本地已有权重（替换上一行，并将 SAM2_DOWNLOAD_CKPT 置 0）：
+      # - ../src/checkpoints:/app/src/checkpoints:ro
+      # 【可选】挂载完整 config.yaml（注意该文件含密钥，勿提交 git）：
+      # - ../config.yaml:/app/config.yaml:ro
+
+    restart: unless-stopped
+    # SAM2 tiny CPU 推理约需 1~2GB 内存，按宿主机情况调整
+    mem_limit: 4g
+
+volumes:
+  sam2-checkpoints:

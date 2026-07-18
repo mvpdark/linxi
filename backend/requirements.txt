@@ -1,0 +1,46 @@
+# ===========================================================================
+# 灵犀后端 Python 依赖（Docker 部署专用，Python 3.12）
+#
+# 说明：
+#   - torch / torchvision 使用 CPU 版本（从 PyTorch 官方 cpu 索引安装，
+#     避免拉取数 GB 的 nvidia-* CUDA 依赖，镜像体积减小约 2~3 GB）
+#   - sam2 包本体不通过 pip 安装，而是直接复制源码目录并用 PYTHONPATH 暴露
+#     （跳过其 CUDA 扩展编译，CPU 推理无需该扩展），此处仅列出其运行依赖
+# ===========================================================================
+
+# -- PyTorch CPU 版（+cpu 构建只存在于下方索引） ------------------------------
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.5.1+cpu
+torchvision==0.20.1+cpu
+
+# -- Web 框架 ------------------------------------------------------------------
+fastapi>=0.110.0
+uvicorn[standard]>=0.29.0        # [standard] 附带 websockets/httptools，WebSocket 流式聊天必需
+python-multipart>=0.0.9          # FastAPI 文件上传（UploadFile / Form）必需
+
+# -- HTTP 客户端 / 配置 --------------------------------------------------------
+httpx>=0.27.0
+pyyaml>=6.0
+
+# -- 图像处理 ------------------------------------------------------------------
+pillow>=10.0.0
+numpy>=1.24.4
+py360convert>=0.1.0              # 全景图：立方体六面 ↔ 等距柱状投影转换
+opencv-python-headless>=4.8.0    # SAM mask → 多边形轮廓提取（headless 版无需 GUI 库）
+
+# -- SAM 2 运行依赖（sam2 源码由 Dockerfile 复制，见 PYTHONPATH） ----------------
+hydra-core>=1.3.2                # build_sam2 的模型配置加载（含 omegaconf）
+iopath>=0.1.10                   # 权重文件读取
+tqdm>=4.66.1
+
+# -- 数据库 --------------------------------------------------------------------
+sqlalchemy[asyncio]>=2.0.0       # 异步 ORM（[asyncio] 启用 AsyncSession 支持）
+asyncpg>=0.29.0                  # PostgreSQL 异步驱动
+alembic>=1.13.0                  # 数据库迁移工具
+
+# -- 认证 / 安全 ----------------------------------------------------------------
+pyjwt>=2.8.0                     # JWT 签发与校验
+passlib[bcrypt]>=1.7.4           # 密码哈希（bcrypt）
+bcrypt==4.0.1                    # 必须 pin 4.0.1：passlib 1.7.4 与 bcrypt 4.1+/5.x 不兼容
+                                 # （读取已移除的 bcrypt.__about__ 导致 CryptContext 报错）
+cryptography>=41.0.0             # JWT 签名依赖
