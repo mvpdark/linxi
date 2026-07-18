@@ -63,19 +63,13 @@ jobs:
       - name: Build Release APK
         env:
           LINGXI_KEYSTORE_PATH: ${{ github.workspace }}/lingxi.keystore
-          LINGXI_KEYSTORE_PASSWORD: ${{ secrets.LINGXI_KEYSTORE_PASSWORD || 'android' }}
-          LINGXI_KEY_ALIAS: ${{ secrets.LINGXI_KEY_ALIAS || 'lingxi' }}
-          LINGXI_KEY_PASSWORD: ${{ secrets.LINGXI_KEY_PASSWORD || 'android' }}
+          LINGXI_KEYSTORE_PASSWORD: ${{ secrets.LINGXI_KEYSTORE_PASSWORD }}
+          LINGXI_KEY_ALIAS: ${{ secrets.LINGXI_KEY_ALIAS }}
+          LINGXI_KEY_PASSWORD: ${{ secrets.LINGXI_KEY_PASSWORD }}
         run: |
-          # 生成签名密钥（如果 GitHub Secrets 未配置，则使用默认 debug 密钥）
-          if [ -n "${{ secrets.LINGXI_KEYSTORE_BASE64 }}" ]; then
-            echo "${{ secrets.LINGXI_KEYSTORE_BASE64 }}" | base64 -d > lingxi.keystore
-          else
-            keytool -genkeypair -v -keystore lingxi.keystore -alias lingxi \
-              -keyalg RSA -keysize 2048 -validity 36500 \
-              -storepass android -keypass android \
-              -dname "CN=Lingxi, OU=Dev, O=MvpDark, L=Beijing, ST=Beijing, C=CN"
-          fi
+          # 使用 GitHub Secrets 中存储的固定签名密钥（保证 APK 签名一致，可覆盖安装）
+          echo "${{ secrets.LINGXI_KEYSTORE_BASE64 }}" | base64 -d > lingxi.keystore
+          echo "Keystore size: $(wc -c < lingxi.keystore) bytes"
 
           cd frontend-capacitor/android
           chmod +x gradlew

@@ -9,15 +9,15 @@
   <title>灵犀</title>
   <!-- 注意：全部使用相对路径，兼容 Web 部署（/static/ 挂载）与 Tauri/Capacitor 打包（webview 根目录） -->
   <link rel="icon" type="image/svg+xml" href="favicon.svg">
-  <link rel="stylesheet" href="css/style.css?v=20260718d3">
-  <link rel="stylesheet" href="css/auth.css?v=20260718d3">
+  <link rel="stylesheet" href="css/style.css?v=20260718e1">
+  <link rel="stylesheet" href="css/auth.css?v=20260718e1">
   <!-- Vue 3（本地 vendor） -->
-  <script src="vendor/vue.global.prod.js"></script>
+  <script src="vendor/vue.global.prod.js?v=20260718e1"></script>
   <!-- Konva (Canvas 交互，本地 vendor) -->
-  <script src="vendor/konva.min.js"></script>
+  <script src="vendor/konva.min.js?v=20260718e1"></script>
   <!-- Pannellum 全景查看器（本地 vendor） -->
-  <link rel="stylesheet" href="vendor/pannellum.css">
-  <script src="vendor/pannellum.js"></script>
+  <link rel="stylesheet" href="vendor/pannellum.css?v=20260718e1">
+  <script src="vendor/pannellum.js?v=20260718e1"></script>
 </head>
 <body>
   <!-- 登录遮罩：auth.js 控制显示/隐藏（默认隐藏，由 auth.js 初始化时按需显示，避免登录态用户看到闪烁） -->
@@ -82,7 +82,7 @@
           </svg>
         </div>
         <div class="icon-rail-spacer"></div>
-        <div class="icon-rail-btn" title="设置">
+        <div class="icon-rail-btn" title="设置" @click="showUserMenu = !showUserMenu">
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
           </svg>
@@ -287,12 +287,12 @@
   </div>
 
   <!-- JS: 先加载认证模块，再加载组件定义，最后加载主应用 -->
-  <script src="js/auth.js?v=20260718d3"></script>
-  <script src="js/image-store.js?v=20260718d3"></script>
-  <script src="js/updater.js?v=20260718d3"></script>
-  <script src="js/chat.js?v=20260718d3"></script>
-  <script src="js/image-edit.js?v=20260718d3"></script>
-  <script src="js/panorama.js?v=20260718d3"></script>
-  <script src="js/app.js?v=20260718d3"></script>
+  <script src="js/auth.js?v=20260718e1"></script>
+  <script src="js/image-store.js?v=20260718e1"></script>
+  <script src="js/updater.js?v=20260718e1"></script>
+  <script src="js/chat.js?v=20260718e1"></script>
+  <script src="js/image-edit.js?v=20260718e1"></script>
+  <script src="js/panorama.js?v=20260718e1"></script>
+  <script src="js/app.js?v=20260718e1"></script>
 </body>
 </html>

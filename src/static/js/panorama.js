@@ -108,7 +108,7 @@ window.PanoramaView = {
           <div v-for="pos in facePositions" :key="pos.key" class="pano-upload-slot"
                :class="{ filled: uploadFaces[pos.key] }"
                @click="triggerUpload(pos.key)">
-            <img v-if="uploadFaces[pos.key]" :src="getImgUrl(uploadFaces[pos.key])" class="pano-slot-img" />
+            <img v-if="uploadFaces[pos.key]" :src="uploadFaceUrls[pos.key]" class="pano-slot-img" />
             <div v-else class="pano-slot-placeholder">
               <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
               <span>{{ pos.label }}</span>
@@ -118,7 +118,7 @@ window.PanoramaView = {
         </div>
         <!-- 平面图上传 -->
         <div class="pano-floorplan-upload" @click="triggerUpload('floorplan')">
-          <img v-if="uploadFaces.floorplan" :src="getImgUrl(uploadFaces.floorplan)" class="pano-slot-img" />
+          <img v-if="uploadFaces.floorplan" :src="uploadFaceUrls.floorplan" class="pano-slot-img" />
           <div v-else class="pano-slot-placeholder">
             <span>📐 上传平面图（可选）</span>
           </div>
@@ -140,7 +140,7 @@ window.PanoramaView = {
         </div>
         <div class="pano-gen-section">
           <div class="pano-gen-upload" @click="triggerFloorplanUpload()">
-            <img v-if="genFloorPlan" :src="getImgUrl(genFloorPlan)" class="pano-slot-img" />
+            <img v-if="genFloorPlan" :src="genFloorPlanUrl" class="pano-slot-img" />
             <div v-else class="pano-slot-placeholder">
               <span>📐 上传平面图</span>
             </div>
@@ -153,7 +153,7 @@ window.PanoramaView = {
           </div>
           
           <div class="pano-gen-upload" @click="triggerStyleRefUpload()">
-            <img v-if="genStyleRef" :src="getImgUrl(genStyleRef)" class="pano-slot-img" />
+            <img v-if="genStyleRef" :src="genStyleRefUrl" class="pano-slot-img" />
             <div v-else class="pano-slot-placeholder">
               <span>🎨 风格参考图（可选）</span>
             </div>
@@ -181,7 +181,7 @@ window.PanoramaView = {
           <video v-show="!cameraPhotos[facePositions[cameraStep].key]" 
                  ref="cameraVideo" class="pano-camera-video" autoplay playsinline></video>
           <img v-if="cameraPhotos[facePositions[cameraStep].key]"
-               :src="getCameraPhotoUrl(facePositions[cameraStep].key)" class="pano-camera-preview" />
+               :src="cameraPreviewUrls[facePositions[cameraStep].key]" class="pano-camera-preview" />
           
           <!-- 引导框 -->
           <div v-if="!cameraPhotos[facePositions[cameraStep].key]" class="pano-guide-overlay">
@@ -224,7 +224,7 @@ window.PanoramaView = {
         <div class="pano-viewer-header">
           <span class="pano-back-btn" @click="closeViewer">← 重新制作</span>
           <h3>360° 全景</h3>
-          <a :href="getResolvedPanoUrl()" download class="pano-download-btn">下载</a>
+          <a :href="panoDownloadUrl" download class="pano-download-btn">下载</a>
         </div>
         <div ref="panoViewer" class="pano-viewer"></div>
         <p class="pano-viewer-hint">👆 拖动画面查看 360° 视角</p>
@@ -242,6 +242,7 @@ window.PanoramaView = {
     const stitching = ref(false);
     const generating = ref(false);
     const panoramaUrl = ref('');
+    const panoDownloadUrl = ref(''); // 全景图下载 URL（避免 async 函数绑定到 href）
     const historyList = ref([]);
     
     // Toast 通知
@@ -262,6 +263,7 @@ window.PanoramaView = {
     
     // 上传模式数据
     const uploadFaces = reactive({});
+    const uploadFaceUrls = reactive({}); // 解析后的预览 URL（ID → blob/data URL）
     const facePositions = [
       { key: 'front', label: '前', hint: '正前方墙面' },
       { key: 'right', label: '右', hint: '右侧墙面' },
@@ -281,10 +283,13 @@ window.PanoramaView = {
     const genFloorPlan = ref('');
     const genStyleRef = ref('');
     const genStyleDesc = ref('现代北欧风格，浅色调，木质家具，温暖自然光');
+    const genFloorPlanUrl = ref(''); // 解析后的平面图预览 URL
+    const genStyleRefUrl = ref('');  // 解析后的风格参考图预览 URL
     
     // 拍照模式
     const cameraStep = ref(0);
     const cameraPhotos = reactive({});
+    const cameraPreviewUrls = reactive({}); // 拍照预览 URL（避免 async 函数绑定到 src）
     const cameraVideo = ref(null);
     // MediaStream 用普通变量持有：避免 Vue 对原生流对象做深度响应式代理
     let cameraStream = null;
@@ -322,12 +327,15 @@ window.PanoramaView = {
         const data = await res.json();
         // 架构改造：后端返回 {image: dataUrl, id: imgId}，存 IndexedDB
         if (data.image && window.ImageStore) {
-          const imgId = data.id || await window.ImageStore.saveImage(data.image);
-          if (!data.id) await window.ImageStore.saveImage(data.image, imgId);
+          const imgId = data.id
+            ? await window.ImageStore.saveImage(data.image, data.id)
+            : await window.ImageStore.saveImage(data.image);
           uploadFaces[slotKey] = imgId;
+          uploadFaceUrls[slotKey] = await window.ImageStore.getImageUrl(imgId);
         } else if (data.url) {
           // 兼容旧格式
           uploadFaces[slotKey] = data.url;
+          uploadFaceUrls[slotKey] = getImgUrl(data.url);
         }
         checkCanStitch();
       } catch (err) {
@@ -348,8 +356,7 @@ window.PanoramaView = {
           if (window.ImageStore && window.ImageStore.isImageId(imgRef)) {
             const dataUrl = await window.ImageStore.getImageDataUrl(imgRef);
             if (!dataUrl) throw new Error('读取面图失败（IndexedDB 无数据）');
-            const resp = await fetch(dataUrl);
-            blob = await resp.blob();
+            blob = dataUrlToBlob(dataUrl);
           } else {
             // 兼容旧 URL
             const res = await apiFetch(getImgUrl(imgRef));
@@ -375,8 +382,9 @@ window.PanoramaView = {
           // 架构改造：后端返回 {image: dataUrl, id: panoId}，存 IndexedDB
           let panoDisplayUrl;
           if (data.image && window.ImageStore) {
-            const panoId = data.id || await window.ImageStore.saveImage(data.image);
-            if (!data.id) await window.ImageStore.saveImage(data.image, panoId);
+            const panoId = data.id
+              ? await window.ImageStore.saveImage(data.image, data.id)
+              : await window.ImageStore.saveImage(data.image);
             panoramaUrl.value = panoId;
             panoDisplayUrl = await window.ImageStore.getImageUrl(panoId);
           } else {
@@ -407,6 +415,7 @@ window.PanoramaView = {
             // 修正失败，保留原图
           }
           correcting.value = false;
+          panoDownloadUrl.value = panoDisplayUrl;
           await nextTick();
           initPannellum(panoDisplayUrl);
         }
@@ -445,11 +454,14 @@ window.PanoramaView = {
         const data = await res.json();
         // 架构改造：存 IndexedDB
         if (data.image && window.ImageStore) {
-          const imgId = data.id || await window.ImageStore.saveImage(data.image);
-          if (!data.id) await window.ImageStore.saveImage(data.image, imgId);
+          const imgId = data.id
+            ? await window.ImageStore.saveImage(data.image, data.id)
+            : await window.ImageStore.saveImage(data.image);
           genFloorPlan.value = imgId;
+          genFloorPlanUrl.value = await window.ImageStore.getImageUrl(imgId);
         } else {
           genFloorPlan.value = data.url;
+          genFloorPlanUrl.value = getImgUrl(data.url);
         }
       } catch (err) {
         showPanoToast('上传失败: ' + err.message);
@@ -473,11 +485,14 @@ window.PanoramaView = {
         const data = await res.json();
         // 架构改造：存 IndexedDB
         if (data.image && window.ImageStore) {
-          const imgId = data.id || await window.ImageStore.saveImage(data.image);
-          if (!data.id) await window.ImageStore.saveImage(data.image, imgId);
+          const imgId = data.id
+            ? await window.ImageStore.saveImage(data.image, data.id)
+            : await window.ImageStore.saveImage(data.image);
           genStyleRef.value = imgId;
+          genStyleRefUrl.value = await window.ImageStore.getImageUrl(imgId);
         } else {
           genStyleRef.value = data.url;
+          genStyleRefUrl.value = getImgUrl(data.url);
         }
       } catch (err) {
         showPanoToast('上传失败: ' + err.message);
@@ -538,15 +553,18 @@ window.PanoramaView = {
             showPanoToast('生成失败: ' + data.error);
           } else if (data.image && window.ImageStore) {
             // 架构改造：后端返回 {image: dataUrl, id: panoId}
-            const panoId = data.id || await window.ImageStore.saveImage(data.image);
-            if (!data.id) await window.ImageStore.saveImage(data.image, panoId);
+            const panoId = data.id
+              ? await window.ImageStore.saveImage(data.image, data.id)
+              : await window.ImageStore.saveImage(data.image);
             panoramaUrl.value = panoId;
             const displayUrl = await window.ImageStore.getImageUrl(panoId);
+            panoDownloadUrl.value = displayUrl;
             await nextTick();
             initPannellum(displayUrl);
           } else if (data.url) {
             // 兼容旧格式
             panoramaUrl.value = data.url;
+            panoDownloadUrl.value = data.url;
             await nextTick();
             initPannellum(data.url);
           }
@@ -606,14 +624,18 @@ window.PanoramaView = {
           const formData = new FormData();
           formData.append('file', blob, `${key}.jpg`);
           const res = await apiFetch('/api/upload', { method: 'POST', body: formData });
+          if (!res.ok) { showPanoToast('上传失败'); return; }
           const data = await res.json();
           // 架构改造：存 IndexedDB
           if (data.image && window.ImageStore) {
-            const imgId = data.id || await window.ImageStore.saveImage(data.image);
-            if (!data.id) await window.ImageStore.saveImage(data.image, imgId);
+            const imgId = data.id
+              ? await window.ImageStore.saveImage(data.image, data.id)
+              : await window.ImageStore.saveImage(data.image);
             cameraPhotos[key] = imgId;
+            cameraPreviewUrls[key] = await window.ImageStore.getImageUrl(imgId);
           } else {
             cameraPhotos[key] = data.url;
+            cameraPreviewUrls[key] = getImgUrl(data.url);
           }
         } catch (err) {
           showPanoToast('上传失败: ' + err.message);
@@ -622,7 +644,9 @@ window.PanoramaView = {
     }
     
     function retakePhoto() {
-      delete cameraPhotos[facePositions[cameraStep.value].key];
+      const key = facePositions[cameraStep.value].key;
+      delete cameraPhotos[key];
+      delete cameraPreviewUrls[key];
     }
     
     function nextCameraStep() {
@@ -643,8 +667,7 @@ window.PanoramaView = {
           if (window.ImageStore && window.ImageStore.isImageId(imgRef)) {
             const dataUrl = await window.ImageStore.getImageDataUrl(imgRef);
             if (!dataUrl) throw new Error('读取拍照面图失败');
-            const resp = await fetch(dataUrl);
-            blob = await resp.blob();
+            blob = dataUrlToBlob(dataUrl);
           } else {
             const res = await apiFetch(getImgUrl(imgRef));
             blob = await res.blob();
@@ -665,8 +688,9 @@ window.PanoramaView = {
           // 架构改造：后端返回 {image, id}，存 IndexedDB
           let panoDisplayUrl;
           if (data.image && window.ImageStore) {
-            const panoId = data.id || await window.ImageStore.saveImage(data.image);
-            if (!data.id) await window.ImageStore.saveImage(data.image, panoId);
+            const panoId = data.id
+              ? await window.ImageStore.saveImage(data.image, data.id)
+              : await window.ImageStore.saveImage(data.image);
             panoramaUrl.value = panoId;
             panoDisplayUrl = await window.ImageStore.getImageUrl(panoId);
           } else {
@@ -695,6 +719,7 @@ window.PanoramaView = {
             // 保留原图
           }
           correcting.value = false;
+          panoDownloadUrl.value = panoDisplayUrl;
           await nextTick();
           initPannellum(panoDisplayUrl);
         }
@@ -741,12 +766,17 @@ window.PanoramaView = {
       activeMode.value = null;
       // 清空数据
       canStitch.value = false;
+      panoDownloadUrl.value = '';
       Object.keys(uploadFaces).forEach(k => delete uploadFaces[k]);
+      Object.keys(uploadFaceUrls).forEach(k => delete uploadFaceUrls[k]);
       Object.keys(cameraPhotos).forEach(k => delete cameraPhotos[k]);
+      Object.keys(cameraPreviewUrls).forEach(k => delete cameraPreviewUrls[k]);
       cameraStep.value = 0;
       // 清空 AI 生成模式数据，防止残留
       genFloorPlan.value = '';
       genStyleRef.value = '';
+      genFloorPlanUrl.value = '';
+      genStyleRefUrl.value = '';
       genStyleDesc.value = '现代北欧风格，浅色调，木质家具，温暖自然光';
     }
     
@@ -896,6 +926,7 @@ window.PanoramaView = {
         }
       }
       panoramaUrl.value = item.url;
+      panoDownloadUrl.value = displayUrl;
       activeMode.value = null;
       await nextTick();
       await nextTick();
@@ -927,10 +958,10 @@ window.PanoramaView = {
     });
     
     return {
-      activeMode, facePositions, uploadFaces, canStitch,
-      stitching, generating, panoramaUrl, correcting, historyList,
-      genFloorPlan, genStyleRef, genStyleDesc,
-      cameraStep, cameraPhotos, cameraVideo, panoViewer, fileInput,
+      activeMode, facePositions, uploadFaces, uploadFaceUrls, canStitch,
+      stitching, generating, panoramaUrl, panoDownloadUrl, correcting, historyList,
+      genFloorPlan, genStyleRef, genStyleDesc, genFloorPlanUrl, genStyleRefUrl,
+      cameraStep, cameraPhotos, cameraPreviewUrls, cameraVideo, panoViewer, fileInput,
       floorplanInput, styleRefInput,
       panoToast, showPanoToast,
       getImgUrl,

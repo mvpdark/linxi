@@ -36,7 +36,11 @@
                 }
             };
             req.onsuccess = () => resolve(req.result);
-            req.onerror = () => reject(req.error);
+            req.onerror = () => {
+                // 失败时清空缓存，允许下次重试
+                dbPromise = null;
+                reject(req.error);
+            };
         });
         return dbPromise;
     }

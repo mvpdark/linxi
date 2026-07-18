@@ -6,7 +6,7 @@
 /* --- 登录遮罩 --- */
 .auth-overlay {
   position: fixed;
-  inset: 0;
+  top: 0; right: 0; bottom: 0; left: 0;
   z-index: 9999;
   display: flex;
   align-items: center;
@@ -152,6 +152,11 @@
   border-top-color: #FFFFFF;
   border-radius: 50%;
   animation: auth-spin 0.6s linear infinite;
+}
+
+/* hidden 属性覆盖（display:inline-block 会覆盖 hidden 的 display:none） */
+.auth-button-spinner[hidden] {
+  display: none;
 }
 
 /* --- 余额显示条 --- */

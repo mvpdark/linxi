@@ -712,7 +712,7 @@ img {
 /* 侧边栏 */
 .sidebar-overlay {
   position: fixed;
-  inset: 0;
+  top: 0; right: 0; bottom: 0; left: 0;
   background: rgba(0,0,0,0.35);
   z-index: 150;
   opacity: 0;
@@ -1322,7 +1322,7 @@ img {
 /* 图片放大弹窗 */
 .image-modal {
   position: fixed;
-  inset: 0;
+  top: 0; right: 0; bottom: 0; left: 0;
   background: var(--overlay-bg);
   z-index: 200;
   display: flex;
@@ -1343,6 +1343,7 @@ img {
 /* 注意：transform 由 JS 内联 style 控制（含 pan/scale），CSS 不写 transform */
 .img-rotate-wrapper {
   position: absolute;
+  width: 100vh;
   width: 100dvh;
   height: 100vw;
   top: 50%;
@@ -2072,7 +2073,7 @@ img {
 }
 .scan-grid {
   position: absolute;
-  inset: 0;
+  top: 0; right: 0; bottom: 0; left: 0;
   background-image:
     linear-gradient(rgba(122,155,122,0.04) 1px, transparent 1px),
     linear-gradient(90deg, rgba(122,155,122,0.04) 1px, transparent 1px);
@@ -2936,6 +2937,7 @@ img {
 /* 图片弹窗旋转容器（替代 chat.js 内联样式） */
 .image-modal-rotate {
   position: absolute;
+  width: 100vh;
   width: 100dvh;
   height: 100vw;
   top: 50%;

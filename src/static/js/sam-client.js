@@ -88,46 +88,55 @@ export async function preloadModel(onProgress) {
   if (_loadingPromise) return _loadingPromise;
 
   _loadingPromise = (async () => {
-    const transformers = await getTransformers();
-    const { EdgeTamModel, AutoProcessor, env } = transformers;
+    try {
+      const transformers = await getTransformers();
+      const { EdgeTamModel, AutoProcessor, env } = transformers;
 
-    // 配置运行环境
-    // 优先使用本地打包的模型（APK 内 assets/public/models/）
-    // Web 环境回退到 HuggingFace CDN
-    env.allowLocalModels = true;
-    env.allowRemoteModels = true; // 允许回退到 CDN（Web 环境）
-    env.localModelPath = '/models/'; // Capacitor: assets/public/models/ → /models/
-    env.useBrowserCache = true; // 使用 IndexedDB 缓存模型（CDN 回退时）
+      // 配置运行环境
+      // 优先使用本地打包的模型（APK 内 assets/public/models/）
+      // Web 环境回退到 HuggingFace CDN
+      env.allowLocalModels = true;
+      env.allowRemoteModels = true; // 允许回退到 CDN（Web 环境）
+      env.localModelPath = '/models/'; // Capacitor: assets/public/models/ → /models/
+      env.useBrowserCache = true; // 使用 IndexedDB 缓存模型（CDN 回退时）
 
-    // 检测推理后端
-    _backend = detectWebGPU() ? 'webgpu' : 'wasm';
-    console.log(`[SAM] 使用推理后端: ${_backend}`);
+      // 检测推理后端
+      _backend = detectWebGPU() ? 'webgpu' : 'wasm';
+      console.log(`[SAM] 使用推理后端: ${_backend}`);
 
-    // 进度回调
-    const progressCallback = (data) => {
-      if (onProgress && data.status === 'progress') {
-        const pct = Math.round(data.progress || 0);
-        const file = data.file || data.name || '';
-        onProgress(pct, file);
-      }
-      if (data.status === 'ready') {
-        console.log(`[SAM] 模型文件已就绪: ${data.file || ''}`);
-      }
-    };
+      // 进度回调
+      const progressCallback = (data) => {
+        if (onProgress && data.status === 'progress') {
+          const pct = Math.round(data.progress || 0);
+          const file = data.file || data.name || '';
+          onProgress(pct, file);
+        }
+        if (data.status === 'ready') {
+          console.log(`[SAM] 模型文件已就绪: ${data.file || ''}`);
+        }
+      };
 
-    // 加载模型
-    console.log(`[SAM] 加载模型: ${MODEL_ID}`);
-    _model = await EdgeTamModel.from_pretrained(MODEL_ID, {
-      dtype: 'q8', // 8 位量化，平衡大小和精度
-      device: _backend,
-      progress_callback: progressCallback,
-    });
+      // 加载模型
+      console.log(`[SAM] 加载模型: ${MODEL_ID}`);
+      _model = await EdgeTamModel.from_pretrained(MODEL_ID, {
+        dtype: 'q8', // 8 位量化，平衡大小和精度
+        device: _backend,
+        progress_callback: progressCallback,
+      });
 
-    // 加载预处理器
-    _processor = await AutoProcessor.from_pretrained(MODEL_ID);
+      // 加载预处理器
+      _processor = await AutoProcessor.from_pretrained(MODEL_ID);
 
-    console.log('[SAM] 模型加载完成 ✓');
-    return { model: _model, processor: _processor, backend: _backend };
+      console.log('[SAM] 模型加载完成 ✓');
+      return { model: _model, processor: _processor, backend: _backend };
+    } catch (e) {
+      // 加载失败时清除状态，允许下次重试
+      _model = null;
+      _processor = null;
+      _loadingPromise = null;
+      console.error('[SAM] 模型加载失败:', e);
+      throw e;
+    }
   })();
 
   return _loadingPromise;

@@ -962,10 +962,9 @@ window.ImageEditView = {
         // 架构改造：后端返回 {image: dataUrl, id: imgId}
         // 前端存 IndexedDB，imageUrl 用 ID 引用，另存 _resolvedUrl 给显示用
         if (uploadData.image && window.ImageStore) {
-          const imgId = uploadData.id || await window.ImageStore.saveImage(uploadData.image);
-          if (!uploadData.id) {
-            await window.ImageStore.saveImage(uploadData.image, imgId);
-          }
+          const imgId = uploadData.id
+            ? await window.ImageStore.saveImage(uploadData.image, uploadData.id)
+            : await window.ImageStore.saveImage(uploadData.image);
           imageUrl.value = imgId;
           imageName.value = imgId;
           // 异步解析给显示用

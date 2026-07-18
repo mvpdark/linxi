@@ -97,6 +97,13 @@
         }
     }
 
+    // 下载进度监听器 handle（避免重复注册）
+    let progressListenerHandle = null;
+    // 稍后重试的定时器
+    let laterTimer = null;
+    // 启动检查的定时器
+    let startCheckTimer = null;
+
     /**
      * 开始下载并安装更新
      */
@@ -106,18 +113,26 @@
             console.error('[updater] 无法下载：插件不可用或无更新信息');
             return;
         }
+        if (updateState === STATE.DOWNLOADING) {
+            console.warn('[updater] 已在下载中，忽略重复调用');
+            return;
+        }
 
         updateState = STATE.DOWNLOADING;
         downloadProgress = 0;
         notify();
 
-        // 监听下载进度
-        plugin.addListener('downloadProgress', (data) => {
-            downloadProgress = data.progress || 0;
-            notify();
-        });
+        // 先移除旧监听器
+        if (progressListenerHandle) {
+            try { await progressListenerHandle.remove(); } catch (e) {}
+            progressListenerHandle = null;
+        }
 
         try {
+            progressListenerHandle = await plugin.addListener('downloadProgress', (data) => {
+                downloadProgress = data.progress || 0;
+                notify();
+            });
             await plugin.downloadAndInstall({ url: updateInfo.downloadUrl });
             updateState = STATE.READY;
             notify();
@@ -126,6 +141,11 @@
             console.error('[updater] 下载失败:', e);
             updateState = STATE.ERROR;
             notify();
+        } finally {
+            if (progressListenerHandle) {
+                try { await progressListenerHandle.remove(); } catch (e) {}
+                progressListenerHandle = null;
+            }
         }
     }
 
@@ -136,8 +156,11 @@
         updateState = STATE.IDLE;
         updateInfo = null;
         notify();
-        // 4 小时后重新检查
-        setTimeout(() => checkUpdate(true), 4 * 60 * 60 * 1000);
+        if (laterTimer) clearTimeout(laterTimer);
+        laterTimer = setTimeout(() => {
+            laterTimer = null;
+            checkUpdate(true);
+        }, 4 * 60 * 60 * 1000);
     }
 
     /**
@@ -145,7 +168,11 @@
      */
     function autoCheckOnStart() {
         if (!isNative()) return;
-        setTimeout(() => checkUpdate(true), 3000);
+        if (startCheckTimer) clearTimeout(startCheckTimer);
+        startCheckTimer = setTimeout(() => {
+            startCheckTimer = null;
+            checkUpdate(true);
+        }, 3000);
     }
 
     // 暴露到全局
