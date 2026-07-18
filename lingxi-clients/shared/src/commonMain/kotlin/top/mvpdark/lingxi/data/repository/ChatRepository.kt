@@ -12,6 +12,7 @@ import io.ktor.websocket.readText
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.isActive
 import kotlinx.serialization.encodeToString
 import top.mvpdark.lingxi.core.network.ApiClient
 import top.mvpdark.lingxi.core.network.TokenStore

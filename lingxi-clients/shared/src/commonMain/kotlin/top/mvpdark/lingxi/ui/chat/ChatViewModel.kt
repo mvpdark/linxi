@@ -10,6 +10,7 @@ import kotlinx.coroutines.launch
 import top.mvpdark.lingxi.data.model.AgentEvent
 import top.mvpdark.lingxi.data.model.ChatMessage
 import top.mvpdark.lingxi.data.model.ChatSession
+import top.mvpdark.lingxi.core.util.currentTimeMillis
 import top.mvpdark.lingxi.data.repository.ChatRepository
 
 /**
@@ -172,7 +173,7 @@ class ChatViewModel(
 
             // 追加用户消息到列表
             val userMessage = ChatMessage(
-                id = "local_${System.currentTimeMillis()}",
+                id = "local_${currentTimeMillis()}",
                 sessionId = sessionId,
                 role = "user",
                 content = pendingText,
@@ -249,7 +250,7 @@ class ChatViewModel(
                 val fullText = _uiState.value.streamingText
                 if (fullText.isNotEmpty()) {
                     val aiMessage = ChatMessage(
-                        id = "ai_${System.currentTimeMillis()}",
+                        id = "ai_${currentTimeMillis()}",
                         sessionId = sessionId,
                         role = "assistant",
                         content = fullText,

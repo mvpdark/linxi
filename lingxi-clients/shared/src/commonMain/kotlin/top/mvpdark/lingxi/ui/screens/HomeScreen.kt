@@ -45,6 +45,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import org.koin.compose.viewmodel.koinViewModel
+import top.mvpdark.lingxi.core.util.formatDouble
 import top.mvpdark.lingxi.ui.auth.AuthViewModel
 import top.mvpdark.lingxi.ui.chat.ChatViewModel
 
@@ -93,7 +94,7 @@ fun HomeScreen(
                         )
                         val balance = authState.user?.balance ?: 0.0
                         Text(
-                            text = "余额 ¥%.2f".format(balance),
+                            text = "余额 ¥${formatDouble(balance)}",
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )

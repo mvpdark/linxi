@@ -55,9 +55,6 @@ kotlin {
             implementation(libs.coil.compose)
             implementation(libs.coil.network.ktor)
 
-            // DataStore
-            implementation(libs.datastore.preferences)
-
             // Navigation
             implementation(libs.navigation.compose)
 
@@ -68,6 +65,7 @@ kotlin {
 
         androidMain.dependencies {
             implementation(libs.ktor.client.okhttp)
+            implementation(libs.datastore.preferences)
         }
 
         val desktopMain by getting {
