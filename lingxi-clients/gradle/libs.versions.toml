@@ -15,6 +15,7 @@ lifecycle = "2.9.6"
 activity-compose = "1.10.1"
 core-ktx = "1.16.0"
 material = "1.12.0"
+onnxruntime = "1.26.0"
 
 [libraries]
 # Ktor
@@ -62,6 +63,10 @@ lifecycle-runtime-compose = { module = "org.jetbrains.androidx.lifecycle:lifecyc
 androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "activity-compose" }
 androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "core-ktx" }
 material = { module = "com.google.android.material:material", version.ref = "material" }
+
+# ONNX Runtime（Android：含原生 so；Desktop：纯 JVM + native）
+onnxruntime-android = { module = "com.microsoft.onnxruntime:onnxruntime-android", version.ref = "onnxruntime" }
+onnxruntime-jvm = { module = "com.microsoft.onnxruntime:onnxruntime", version.ref = "onnxruntime" }
 
 [plugins]
 kotlin-multiplatform = { id = "org.jetbrains.kotlin.multiplatform", version.ref = "kotlin" }

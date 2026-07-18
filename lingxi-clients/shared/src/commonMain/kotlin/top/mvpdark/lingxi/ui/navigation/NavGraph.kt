@@ -15,6 +15,7 @@ import top.mvpdark.lingxi.ui.auth.AuthViewModel
 import top.mvpdark.lingxi.ui.components.LoadingIndicator
 import top.mvpdark.lingxi.ui.screens.ChatScreen
 import top.mvpdark.lingxi.ui.screens.HomeScreen
+import top.mvpdark.lingxi.ui.screens.ImageEditScreen
 import top.mvpdark.lingxi.ui.screens.LoginScreen
 import top.mvpdark.lingxi.ui.screens.PlaceholderScreen
 
@@ -87,7 +88,7 @@ fun NavGraph() {
         }
 
         composable(Routes.IMAGE_EDIT) {
-            PlaceholderScreen(title = "改图", subtitle = "草图生成专业效果图（即将上线）")
+            ImageEditScreen()
         }
 
         composable(Routes.PANORAMA) {

@@ -66,6 +66,7 @@ kotlin {
         androidMain.dependencies {
             implementation(libs.ktor.client.okhttp)
             implementation(libs.datastore.preferences)
+            implementation(libs.onnxruntime.android)
         }
 
         val desktopMain by getting {
@@ -73,6 +74,7 @@ kotlin {
                 implementation(libs.ktor.client.java)
                 implementation(libs.coroutines.swing)
                 implementation(compose.desktop.currentOs)
+                implementation(libs.onnxruntime.jvm)
             }
         }
     }

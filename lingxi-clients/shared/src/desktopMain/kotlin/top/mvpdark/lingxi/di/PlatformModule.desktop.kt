@@ -3,10 +3,12 @@ package top.mvpdark.lingxi.di
 import org.koin.dsl.module
 import top.mvpdark.lingxi.core.network.PlatformContext
 import top.mvpdark.lingxi.core.network.TokenStore
+import top.mvpdark.lingxi.sam.SamService
 
 /**
- * Desktop 平台 Koin 模块：提供 [TokenStore]（基于 Preferences，无需平台上下文）。
+ * Desktop 平台 Koin 模块：提供 [TokenStore] 和 [SamService]。
  */
 val platformModule = module {
     single { TokenStore(PlatformContext()) }
+    single { SamService(PlatformContext()) }
 }

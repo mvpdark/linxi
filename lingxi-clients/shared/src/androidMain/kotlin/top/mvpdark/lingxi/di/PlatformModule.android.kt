@@ -3,6 +3,7 @@ package top.mvpdark.lingxi.di
 import org.koin.dsl.module
 import top.mvpdark.lingxi.core.network.PlatformContext
 import top.mvpdark.lingxi.core.network.TokenStore
+import top.mvpdark.lingxi.sam.SamService
 
 /**
  * Android App Context 持有器。
@@ -19,7 +20,7 @@ object AndroidAppContextHolder {
 }
 
 /**
- * Android 平台 Koin 模块：提供 [TokenStore]（依赖 android.content.Context）。
+ * Android 平台 Koin 模块：提供 [TokenStore] 和 [SamService]（依赖 android.content.Context）。
  *
  * 注意：调用方需在 `startKoin` 前完成 [AndroidAppContextHolder] 的初始化。
  */
@@ -29,4 +30,5 @@ val platformModule = module {
             ?: error("AndroidAppContextHolder 未初始化，请在 LingxiApplication.onCreate 中赋值")
         TokenStore(ctx)
     }
+    single { SamService(get<PlatformContext>()) }
 }
