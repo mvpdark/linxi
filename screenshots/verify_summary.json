@@ -1,0 +1,38 @@
+{
+  "screenshot_dir": "c:\\TRAE\\SJS\\screenshots",
+  "viewport": "1280x800",
+  "pages": [
+    {
+      "name": "首页",
+      "url": "http://127.0.0.1:8765/",
+      "save_path": "c:\\TRAE\\SJS\\screenshots\\verify_home.png",
+      "exists": true,
+      "size_bytes": 58574,
+      "console_errors": []
+    },
+    {
+      "name": "聊天页",
+      "url": "http://127.0.0.1:8765/#/chat",
+      "save_path": "c:\\TRAE\\SJS\\screenshots\\verify_chat.png",
+      "exists": true,
+      "size_bytes": 27587,
+      "console_errors": []
+    },
+    {
+      "name": "改图页",
+      "url": "http://127.0.0.1:8765/#/image-edit",
+      "save_path": "c:\\TRAE\\SJS\\screenshots\\verify_image_edit.png",
+      "exists": true,
+      "size_bytes": 18362,
+      "console_errors": []
+    },
+    {
+      "name": "全景页",
+      "url": "http://127.0.0.1:8765/#/panorama",
+      "save_path": "c:\\TRAE\\SJS\\screenshots\\verify_panorama.png",
+      "exists": true,
+      "size_bytes": 83838,
+      "console_errors": []
+    }
+  ]
+}

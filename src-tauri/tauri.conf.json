@@ -1,0 +1,54 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "灵犀",
+  "version": "1.0.0",
+  "identifier": "com.mvpdark.lingxi",
+  "build": {
+    "frontendDist": "../src/static"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "灵犀",
+        "width": 1280,
+        "height": 800,
+        "minWidth": 960,
+        "minHeight": 600,
+        "resizable": true,
+        "fullscreen": false,
+        "center": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": [
+      "nsis",
+      "msi"
+    ],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.ico"
+    ],
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser",
+        "displayLanguageSelector": false,
+        "languages": [
+          "SimpChinese"
+        ]
+      },
+      "webviewInstallMode": {
+        "type": "embedBootstrapper"
+      }
+    },
+    "shortDescription": "灵犀 - AI 室内设计助手",
+    "longDescription": "灵犀：AI 驱动的室内设计助手，支持对话式方案生成、图片编辑与全景预览。"
+  }
+}
