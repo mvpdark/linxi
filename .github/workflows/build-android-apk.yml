@@ -60,6 +60,15 @@ jobs:
       - name: Sync Capacitor Android
         run: cd frontend-capacitor && npx cap sync android
 
+      - name: Set version in build.gradle
+        run: |
+          RUN_NUM=${{ github.run_number }}
+          cd frontend-capacitor/android
+          sed -i "s/versionCode .*/versionCode ${RUN_NUM}/" app/build.gradle
+          sed -i "s/versionName \".*\"/versionName \"1.0.${RUN_NUM}\"/" app/build.gradle
+          echo "Updated version:"
+          grep -E "versionCode|versionName" app/build.gradle
+
       - name: Build Release APK
         env:
           LINGXI_KEYSTORE_PATH: ${{ github.workspace }}/lingxi.keystore
