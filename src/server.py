@@ -1934,6 +1934,18 @@ else:
 # 挂载前端静态文件（CSS/JS）— no-cache 响应头由 add_cache_control 中间件统一设置
 if config.serve_frontend:
     app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
+    # HTML 使用相对路径（css/xxx, js/xxx, vendor/xxx），需将子目录挂载到根路径
+    for _sub in ("css", "js", "vendor", "assets"):
+        _sub_dir = _STATIC_DIR / _sub
+        if _sub_dir.is_dir():
+            app.mount(f"/{_sub}", StaticFiles(directory=str(_sub_dir)), name=f"frontend_{_sub}")
+    # config.json 和 favicon.svg 也需根路径路由
+    @app.get("/config.json")
+    async def _serve_config_json():
+        return FileResponse(str(_STATIC_DIR / "config.json"))
+    @app.get("/favicon.svg")
+    async def _serve_favicon_svg():
+        return FileResponse(str(_STATIC_DIR / "favicon.svg"))
 
 # /uploads 静态挂载改为代理路由：
 #   - 两段路径 /uploads/{username}/{filename} → WebDAV（带本地缓存兜底）
@@ -1980,6 +1992,8 @@ class _LegacyUrlRedirect(BaseHTTPMiddleware):
     """将 /xxx.ext 的旧格式 URL 重定向到 /uploads/xxx.ext。"""
     # 不需要拦截的路径前缀
     _SKIP_PREFIXES = ("/api/", "/ws/", "/static/", "/uploads/")
+    # serve_frontend=True 时额外跳过的前端路径
+    _FRONTEND_PREFIXES = ("/css/", "/js/", "/vendor/", "/assets/", "/config.json", "/favicon.svg")
 
     async def dispatch(self, request: StarletteRequest, call_next):
         path = request.url.path
@@ -1987,7 +2001,10 @@ class _LegacyUrlRedirect(BaseHTTPMiddleware):
         if path == "/favicon.ico":
             return await call_next(request)
         # 只拦截根路径下的文件请求（如 /upload_xxx.jpg, /generated_xxx.png）
-        if not any(path.startswith(p) for p in self._SKIP_PREFIXES):
+        skip = self._SKIP_PREFIXES
+        if config.serve_frontend:
+            skip = skip + self._FRONTEND_PREFIXES
+        if not any(path.startswith(p) for p in skip):
             if "." in os.path.basename(path):
                 # 是文件请求，重定向到 /uploads/
                 new_url = request.url.replace(path=f"/uploads{path}")
