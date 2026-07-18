@@ -1,7 +1,7 @@
 package top.mvpdark.lingxi.core.network
 
 import io.ktor.client.HttpClient
-import io.ktor.client.plugins.HttpRequestPipeline
+import io.ktor.client.plugins.api.createClientPlugin
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.client.plugins.defaultRequest
 import io.ktor.client.plugins.logging.LogLevel
@@ -39,6 +39,17 @@ class ApiClient(
         explicitNulls = false
     }
 
+    /** 鉴权拦截器插件：每个请求自动注入 Bearer Token。 */
+    private val authPlugin = createClientPlugin("AuthPlugin") {
+        val store = tokenStore
+        onRequest { request, _ ->
+            val token = store.getAccessToken()
+            if (!token.isNullOrBlank() && request.headers[HttpHeaders.Authorization] == null) {
+                request.header(HttpHeaders.Authorization, "Bearer $token")
+            }
+        }
+    }
+
     /** 已配置好的 HttpClient 实例。 */
     val httpClient: HttpClient = HttpClient(createEngine()) {
         install(ContentNegotiation) {
@@ -48,17 +59,10 @@ class ApiClient(
             level = LogLevel.INFO
         }
         install(WebSockets)
+        install(authPlugin)
         defaultRequest {
             url(baseUrl)
             contentType(ContentType.Application.Json)
-        }
-    }.also { client ->
-        // 鉴权拦截器：每个请求自动注入 Bearer Token
-        client.requestPipeline.intercept(HttpRequestPipeline.Before) {
-            val token = tokenStore.getAccessToken()
-            if (!token.isNullOrBlank() && context.headers[HttpHeaders.Authorization] == null) {
-                context.header(HttpHeaders.Authorization, "Bearer $token")
-            }
         }
     }
 
