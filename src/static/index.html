@@ -9,8 +9,8 @@
   <title>灵犀</title>
   <!-- 注意：全部使用相对路径，兼容 Web 部署（/static/ 挂载）与 Tauri/Capacitor 打包（webview 根目录） -->
   <link rel="icon" type="image/svg+xml" href="favicon.svg">
-  <link rel="stylesheet" href="css/style.css?v=20260718b1">
-  <link rel="stylesheet" href="css/auth.css?v=20260718b1">
+  <link rel="stylesheet" href="css/style.css?v=20260718b2">
+  <link rel="stylesheet" href="css/auth.css?v=20260718b2">
   <!-- Vue 3（本地 vendor） -->
   <script src="vendor/vue.global.prod.js"></script>
   <!-- Konva (Canvas 交互，本地 vendor) -->
@@ -92,8 +92,20 @@
       <!-- 顶部导航 -->
       <div class="nav-bar">
         <div class="flex-spacer"></div>
-        <div class="nav-avatar">
+        <div class="nav-avatar" @click="showUserMenu = !showUserMenu" style="position:relative;cursor:pointer;">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 4-6 8-6s8 2 8 6"/></svg>
+          <!-- 用户下拉菜单 -->
+          <div v-if="showUserMenu" class="user-dropdown" @click.stop>
+            <div class="user-dropdown-item" @click="navigate('settings'); showUserMenu = false">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+              <span>设置</span>
+            </div>
+            <div class="user-dropdown-divider"></div>
+            <div class="user-dropdown-item logout" @click="handleUserLogout(); showUserMenu = false">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+              <span>退出登录</span>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -180,10 +192,10 @@
   </div>
 
   <!-- JS: 先加载认证模块，再加载组件定义，最后加载主应用 -->
-  <script src="js/auth.js?v=20260718b1"></script>
-  <script src="js/chat.js?v=20260718b1"></script>
-  <script src="js/image-edit.js?v=20260718b1"></script>
-  <script src="js/panorama.js?v=20260718b1"></script>
-  <script src="js/app.js?v=20260718b1"></script>
+  <script src="js/auth.js?v=20260718b2"></script>
+  <script src="js/chat.js?v=20260718b2"></script>
+  <script src="js/image-edit.js?v=20260718b2"></script>
+  <script src="js/panorama.js?v=20260718b2"></script>
+  <script src="js/app.js?v=20260718b2"></script>
 </body>
 </html>

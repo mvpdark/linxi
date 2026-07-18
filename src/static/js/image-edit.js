@@ -4,12 +4,13 @@
  * 组件挂载到 window.ImageEditView，供 app.js 注册。
  *
  * 功能流程：
- *   上传图片 → VLM 自动检测物品 → SAM 2 精确分割 → 轮廓交互(点击选中) → 输入修改描述 → AI 改图 → 结果展示
+ *   上传图片 → VLM 自动检测物品 → SAM 2 前端本地分割 → 轮廓交互(点击选中) → 输入修改描述 → AI 改图 → 结果展示
  *
  * 依赖：
  *   - Vue 3 全局变量 (CDN)
  *   - Konva 全局变量 (CDN)
- *   - 后端 API: /api/upload, /api/vlm-detect, /api/sam-segment, /api/image-edit, /api/image-edit-annotated
+ *   - sam-client.js (ESM，动态 import) — EdgeTAM 前端本地分割
+ *   - 后端 API: /api/upload, /api/vlm-detect, /api/image-edit, /api/image-edit-annotated
  */
 var { ref, reactive, computed, onMounted, onUnmounted, nextTick, watch } = Vue;
 
@@ -316,9 +317,8 @@ window.ImageEditView = {
     }
 
     /**
-     * 调用 SAM 2 精确分割 API。
-     * 发送原始图片 + VLM 检测到的物体列表（bbox 格式），
-     * 返回每个物体的 polygon（多边形轮廓点列表）和 mask_png_b64。
+     * 调用前端本地 SAM 2 分割（EdgeTAM）。
+     * 在浏览器/WebView 本地运行，不消耗服务器资源。
      *
      * @param {File} file — 原始图片文件
      * @param {Array} objs — 物体列表（含 id 与 bbox）
@@ -326,23 +326,27 @@ window.ImageEditView = {
      *   objects[i] = { id, polygon: [[x,y], ...], mask_png_b64: string }
      */
     async function segmentObjects(file, objs) {
-      const formData = new FormData();
-      formData.append('file', file);
-      formData.append(
-        'objects',
-        JSON.stringify(
-          objs.map((o) => ({ id: o.id, bbox: o.bbox }))
-        )
-      );
-      const res = await fetchWithTimeout('/api/sam-segment', {
-        method: 'POST',
-        body: formData,
-      });
-      if (!res.ok) {
-        const errData = await res.json().catch(() => ({}));
-        throw new Error(errData.error || 'SAM 分割请求失败');
+      // 动态 import ESM 模块（首次加载会触发 transformers.js 下载）
+      const samModule = await import('./js/sam-client.js');
+      const { segmentImage, getModelStatus } = samModule;
+
+      // 检查模型是否已加载，如未加载显示进度
+      const status = getModelStatus();
+      if (!status.loaded) {
+        showToast('正在加载 AI 分割模型（首次约需 1-2 分钟）...');
       }
-      return await res.json();
+
+      const result = await segmentImage(
+        file,
+        objs.map((o) => ({ id: o.id, bbox: o.bbox })),
+        (progress, fileName) => {
+          if (progress > 0 && progress < 100) {
+            console.log(`[SAM] 模型加载进度: ${progress}% (${fileName})`);
+          }
+        }
+      );
+
+      return result;
     }
 
     /** 上传文件大小上限（20MB） */
@@ -933,9 +937,9 @@ window.ImageEditView = {
           }));
         }
 
-        // ============ SAM 2 精确分割 ============
-        // VLM 检测完成后调用 SAM 分割，提取每个物体的精确多边形轮廓。
-        // 若 SAM 不可用（返回 success:false 或请求异常），回退到 bbox 模式。
+        // ============ SAM 2 前端本地分割 ============
+        // VLM 检测完成后在前端本地运行 EdgeTAM 分割，提取每个物体的精确多边形轮廓。
+        // 若分割失败（模型加载失败或推理异常），回退到 bbox 模式。
         if (detectedObjects.length > 0) {
           step.value = 'segmenting';
           try {
