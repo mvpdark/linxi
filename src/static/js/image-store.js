@@ -81,22 +81,13 @@
     }
 
     /**
-     * 获取 Blob URL（供 <img> 显示，调用方负责 revokeObjectURL）
+     * 获取图片 URL（供 <img> 显示）
+     * 直接返回 data URL，避免 Android WebView 中 fetch(dataUrl) 兼容性问题
      * @param {string} id
-     * @returns {Promise<string|null>} blobUrl 或 null
+     * @returns {Promise<string|null>} dataUrl 或 null
      */
     async function getImageUrl(id) {
-        const dataUrl = await getImageDataUrl(id);
-        if (!dataUrl) return null;
-        try {
-            // data URL → blob → object URL
-            const resp = await fetch(dataUrl);
-            const blob = await resp.blob();
-            return URL.createObjectURL(blob);
-        } catch (e) {
-            console.warn('[image-store] dataUrl→blob 失败，回退 dataUrl:', e);
-            return dataUrl;
-        }
+        return await getImageDataUrl(id);
     }
 
     /**
