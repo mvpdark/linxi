@@ -19,9 +19,10 @@ private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(na
  *
  * @param context Android Context（[PlatformContext] 在 Android 上即 Context）。
  */
-actual class TokenStore(private val context: PlatformContext) {
+actual class TokenStore actual constructor(context: PlatformContext) {
 
-    private val dataStore: DataStore<Preferences> get() = context.dataStore
+    private val ctx: Context = context.androidContext
+    private val dataStore: DataStore<Preferences> get() = ctx.dataStore
 
     actual suspend fun getAccessToken(): String? {
         return dataStore.data.map { it[KEY_ACCESS_TOKEN] }.first()

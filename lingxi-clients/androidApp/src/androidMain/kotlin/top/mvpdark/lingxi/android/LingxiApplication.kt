@@ -2,6 +2,7 @@ package top.mvpdark.lingxi.android
 
 import android.app.Application
 import org.koin.core.context.startKoin
+import top.mvpdark.lingxi.core.network.PlatformContext
 import top.mvpdark.lingxi.di.AndroidAppContextHolder
 import top.mvpdark.lingxi.di.appModule
 import top.mvpdark.lingxi.di.platformModule
@@ -16,8 +17,8 @@ import top.mvpdark.lingxi.di.platformModule
 class LingxiApplication : Application() {
     override fun onCreate() {
         super.onCreate()
-        // 注入平台 Context（PlatformContext 在 Android 上即 Context）
-        AndroidAppContextHolder.context = this
+        // 注入平台 Context（PlatformContext 包装 android.content.Context）
+        AndroidAppContextHolder.context = PlatformContext(this)
         // 启动 Koin
         startKoin {
             modules(appModule, platformModule)
