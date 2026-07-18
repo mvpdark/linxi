@@ -42,6 +42,7 @@ src/services/
 src/server.py
 src/db/
 src/models/
+src/static/models/
 src/config.py
 src/__init__.py
 

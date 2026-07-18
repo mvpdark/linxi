@@ -36,6 +36,24 @@ jobs:
           mkdir -p src/static
           echo '{"apiBase": "https://lx.mvpdark.top:8443"}' > src/static/config.json
 
+      - name: Download EdgeTAM q8 model (bundled in APK)
+        run: |
+          MODEL_DIR="src/static/models/onnx-community/EdgeTAM-ONNX"
+          mkdir -p "$MODEL_DIR/onnx"
+          BASE="https://huggingface.co/onnx-community/EdgeTAM-ONNX/resolve/main"
+          echo "Downloading config files..."
+          curl -sL "$BASE/config.json" -o "$MODEL_DIR/config.json"
+          curl -sL "$BASE/preprocessor_config.json" -o "$MODEL_DIR/preprocessor_config.json"
+          curl -sL "$BASE/processor_config.json" -o "$MODEL_DIR/processor_config.json"
+          echo "Downloading q8 quantized model files (~14 MB)..."
+          curl -sL "$BASE/onnx/vision_encoder_quantized.onnx" -o "$MODEL_DIR/onnx/vision_encoder_quantized.onnx"
+          curl -sL "$BASE/onnx/vision_encoder_quantized.onnx_data" -o "$MODEL_DIR/onnx/vision_encoder_quantized.onnx_data"
+          curl -sL "$BASE/onnx/prompt_encoder_mask_decoder_quantized.onnx" -o "$MODEL_DIR/onnx/prompt_encoder_mask_decoder_quantized.onnx"
+          curl -sL "$BASE/onnx/prompt_encoder_mask_decoder_quantized.onnx_data" -o "$MODEL_DIR/onnx/prompt_encoder_mask_decoder_quantized.onnx_data"
+          echo "Model files downloaded:"
+          du -sh "$MODEL_DIR"
+          ls -la "$MODEL_DIR/onnx/"
+
       - name: Install Capacitor dependencies
         run: cd frontend-capacitor && npm install
 

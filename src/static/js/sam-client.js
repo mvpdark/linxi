@@ -92,8 +92,12 @@ export async function preloadModel(onProgress) {
     const { EdgeTamModel, AutoProcessor, env } = transformers;
 
     // 配置运行环境
-    env.allowLocalModels = false;
-    env.useBrowserCache = true; // 使用 IndexedDB 缓存模型
+    // 优先使用本地打包的模型（APK 内 assets/public/models/）
+    // Web 环境回退到 HuggingFace CDN
+    env.allowLocalModels = true;
+    env.allowRemoteModels = true; // 允许回退到 CDN（Web 环境）
+    env.localModelPath = '/models/'; // Capacitor: assets/public/models/ → /models/
+    env.useBrowserCache = true; // 使用 IndexedDB 缓存模型（CDN 回退时）
 
     // 检测推理后端
     _backend = detectWebGPU() ? 'webgpu' : 'wasm';
