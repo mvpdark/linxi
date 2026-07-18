@@ -1,6 +1,5 @@
 import org.jetbrains.kotlin.gradle.ExperimentalKotlinGradlePluginApi
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
-import org.jetbrains.kotlin.gradle.plugin.KotlinSourceSetTree
 
 plugins {
     alias(libs.plugins.kotlin.multiplatform)
@@ -15,12 +14,6 @@ kotlin {
         @OptIn(ExperimentalKotlinGradlePluginApi::class)
         compilerOptions {
             jvmTarget.set(JvmTarget.JVM_11)
-        }
-        instrumentedTestVariant {
-            sourceSetTree.set(KotlinSourceSetTree.test)
-            dependencies {
-                implementation(libs.androidx.core.ktx)
-            }
         }
     }
 
