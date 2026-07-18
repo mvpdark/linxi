@@ -5,10 +5,12 @@ on:
     branches: [main]
     paths:
       - 'lingxi-clients/**'
+      - '.github/workflows/build-native-clients.yml'
   pull_request:
     branches: [main]
     paths:
       - 'lingxi-clients/**'
+      - '.github/workflows/build-native-clients.yml'
   workflow_dispatch:
 
 defaults:
