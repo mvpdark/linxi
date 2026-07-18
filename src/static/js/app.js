@@ -195,6 +195,56 @@ const app = createApp({
       balance: 0,
     });
 
+    // === APK 自动更新 ===
+    const updateModal = Vue.ref({
+      show: false,
+      state: 'idle', // idle, checking, available, downloading, error
+      info: null,
+      progress: 0,
+    });
+
+    function showUpdateModal() {
+      updateModal.value.show = true;
+    }
+
+    function hideUpdateModal() {
+      updateModal.value.show = false;
+    }
+
+    // 初始化更新检测
+    function initUpdater() {
+      if (!window.AppUpdater) return;
+
+      // 监听更新状态变化
+      window.AppUpdater.onChange(({ state, info, progress }) => {
+        updateModal.value.state = state;
+        updateModal.value.info = info;
+        updateModal.value.progress = progress;
+
+        // 发现新版本时自动弹窗
+        if (state === 'available' && info && info.isNewer) {
+          updateModal.value.show = true;
+        }
+      });
+    }
+
+    async function checkUpdateManual() {
+      if (!window.AppUpdater) return;
+      updateModal.value.show = true;
+      updateModal.value.state = 'checking';
+      await window.AppUpdater.checkUpdate(false);
+    }
+
+    async function confirmUpdate() {
+      if (!window.AppUpdater) return;
+      await window.AppUpdater.downloadAndInstall();
+    }
+
+    function dismissUpdate() {
+      if (window.AppUpdater) window.AppUpdater.later();
+      updateModal.value.show = false;
+    }
+
     // 从 AuthManager 加载用户信息
     function loadUserInfo() {
       if (window.AuthManager && window.AuthManager.getUser) {
@@ -258,6 +308,7 @@ const app = createApp({
       onResize();
       loadSessions();
       loadUserInfo();
+      initUpdater();
     });
 
     onUnmounted(() => {
@@ -277,6 +328,10 @@ const app = createApp({
       showUserMenu,
       userInfo,
       handleUserLogout,
+      updateModal,
+      checkUpdateManual,
+      confirmUpdate,
+      dismissUpdate,
     };
   },
 });

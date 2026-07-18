@@ -166,6 +166,173 @@ img {
   flex-shrink: 0;
 }
 
+/* ============================================================
+   APK 自动更新弹窗
+   ============================================================ */
+.update-overlay {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,0.5);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: fade-in 0.2s ease-out;
+}
+
+.update-modal {
+  width: 320px;
+  max-width: 90vw;
+  background: #FFFFFF;
+  border-radius: 20px;
+  padding: 28px 24px;
+  box-shadow: 0 16px 48px rgba(0,0,0,0.2);
+  animation: modal-slide-up 0.25s ease-out;
+}
+
+.update-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+.update-icon {
+  margin-bottom: 12px;
+}
+
+.update-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: #2C3E2C;
+  margin: 0 0 4px;
+}
+
+.update-version {
+  font-size: 14px;
+  color: #7A9B7A;
+  margin: 0 0 12px;
+  font-weight: 500;
+}
+
+.update-desc {
+  font-size: 13px;
+  color: #8E8E93;
+  margin: 0 0 16px;
+  line-height: 1.5;
+}
+
+.update-notes {
+  font-size: 13px;
+  color: #8E8E93;
+  margin: 0 0 20px;
+  text-align: left;
+  max-height: 150px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  line-height: 1.5;
+  padding: 12px;
+  background: rgba(60,55,50,0.03);
+  border-radius: 10px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.update-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  margin-top: 8px;
+}
+
+.update-btn-primary {
+  height: 44px;
+  border: none;
+  border-radius: 12px;
+  background: #7A9B7A;
+  color: white;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.update-btn-primary:active {
+  opacity: 0.85;
+}
+
+.update-btn-secondary {
+  height: 44px;
+  border: none;
+  border-radius: 12px;
+  background: transparent;
+  color: #8E8E93;
+  font-size: 15px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.update-btn-secondary:active {
+  background: rgba(60,55,50,0.04);
+}
+
+.update-spinner {
+  width: 32px;
+  height: 32px;
+  border: 3px solid rgba(122,155,122,0.2);
+  border-top-color: #7A9B7A;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  margin-bottom: 12px;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.update-progress-bar {
+  width: 100%;
+  height: 6px;
+  background: rgba(60,55,50,0.08);
+  border-radius: 3px;
+  overflow: hidden;
+  margin: 16px 0 8px;
+}
+
+.update-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #7A9B7A, #5D7E5D);
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+
+.update-progress-text {
+  font-size: 14px;
+  color: #7A9B7A;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  margin: 0;
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes modal-slide-up {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 .user-panel-info {
   flex: 1;
   min-width: 0;
