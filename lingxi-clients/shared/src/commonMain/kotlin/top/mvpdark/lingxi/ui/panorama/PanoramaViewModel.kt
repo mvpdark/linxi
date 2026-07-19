@@ -8,6 +8,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import top.mvpdark.lingxi.core.util.PlatformLogger
+import top.mvpdark.lingxi.core.util.toUserMessage
 import top.mvpdark.lingxi.data.repository.PanoramaRepository
 
 /**
@@ -88,7 +89,7 @@ class PanoramaViewModel(
                     styleDesc = state.styleDesc.ifBlank { "现代北欧风格" },
                 )
 
-                if (result.image.isNotEmpty()) {
+                if (result.success && result.image.isNotEmpty()) {
                     _uiState.update {
                         it.copy(
                             step = Step.Result,
@@ -113,7 +114,7 @@ class PanoramaViewModel(
                     it.copy(
                         step = Step.Edit,
                         isGenerating = false,
-                        error = e.message ?: "全景图生成失败，请重试",
+                        error = e.toUserMessage(),
                     )
                 }
             } finally {

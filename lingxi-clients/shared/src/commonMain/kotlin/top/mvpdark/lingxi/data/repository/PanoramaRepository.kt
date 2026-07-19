@@ -1,13 +1,16 @@
 package top.mvpdark.lingxi.data.repository
 
 import io.ktor.client.call.body
+import io.ktor.client.plugins.timeout
 import io.ktor.client.request.forms.formData
 import io.ktor.client.request.forms.submitFormWithBinaryData
 import io.ktor.http.Headers
 import io.ktor.http.HttpHeaders
 import kotlinx.serialization.Serializable
 import top.mvpdark.lingxi.core.network.ApiClient
+import top.mvpdark.lingxi.core.util.PlatformLogger
 import top.mvpdark.lingxi.core.util.runCatchingCancellable
+import top.mvpdark.lingxi.core.util.toUserMessage
 
 /**
  * 全景图生成响应。
@@ -17,6 +20,7 @@ data class PanoramaResponse(
     val image: String = "",
     val id: String = "",
     val error: String = "",
+    val success: Boolean = true,
 )
 
 /**
@@ -32,6 +36,9 @@ class PanoramaRepository(
      *
      * POST /api/panorama/ai-generate，multipart 字段：floor_plan + style_desc。
      * 后端返回 {image: dataUrl, id: pano_id}。
+     *
+     * 超时：AI 生成通常需要 30-60 秒，per-request 设置 120 秒
+     * （覆盖全局 30 秒 socket/request 超时，与后端 600 秒超时留足余量）。
      */
     suspend fun aiGenerate(
         floorPlanBytes: ByteArray,
@@ -48,9 +55,15 @@ class PanoramaRepository(
                     })
                     append("style_desc", styleDesc)
                 },
-            ).body<PanoramaResponse>()
+            ) {
+                timeout {
+                    requestTimeoutMillis = 120_000
+                    socketTimeoutMillis = 120_000
+                }
+            }.body<PanoramaResponse>()
         }.getOrElse { e ->
-            PanoramaResponse(error = e.message ?: "全景图生成失败")
+            PlatformLogger.e("PanoramaRepository", "aiGenerate failed", e)
+            PanoramaResponse(success = false, error = e.toUserMessage())
         }
     }
 

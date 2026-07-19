@@ -10,6 +10,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import top.mvpdark.lingxi.core.util.PlatformLogger
+import top.mvpdark.lingxi.core.util.toUserMessage
 import top.mvpdark.lingxi.data.model.Bbox
 import top.mvpdark.lingxi.data.model.DetectedObject
 import top.mvpdark.lingxi.data.repository.ImageEditRepository
@@ -200,7 +201,7 @@ class ImageEditViewModel(
                         step = Step.Upload,
                         samLoading = false,
                         samProgress = 0,
-                        error = e.message ?: "图片处理失败",
+                        error = e.toUserMessage(),
                     )
                 }
             } finally {
@@ -298,7 +299,7 @@ class ImageEditViewModel(
                     it.copy(
                         step = Step.Edit,
                         isEditing = false,
-                        error = e.message ?: "改图失败，请重试",
+                        error = e.toUserMessage(),
                     )
                 }
             } finally {

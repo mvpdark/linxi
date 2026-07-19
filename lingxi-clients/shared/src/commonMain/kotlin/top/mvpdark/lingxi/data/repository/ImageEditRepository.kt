@@ -1,6 +1,7 @@
 package top.mvpdark.lingxi.data.repository
 
 import io.ktor.client.call.body
+import io.ktor.client.plugins.timeout
 import io.ktor.client.request.forms.FormBuilder
 import io.ktor.client.request.forms.formData
 import io.ktor.client.request.forms.submitFormWithBinaryData
@@ -9,7 +10,9 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.content.PartData
 import kotlinx.serialization.encodeToString
 import top.mvpdark.lingxi.core.network.ApiClient
+import top.mvpdark.lingxi.core.util.PlatformLogger
 import top.mvpdark.lingxi.core.util.runCatchingCancellable
+import top.mvpdark.lingxi.core.util.toUserMessage
 import top.mvpdark.lingxi.data.model.DetectedObject
 import top.mvpdark.lingxi.data.model.EditRegion
 import top.mvpdark.lingxi.data.model.ImageEditResponse
@@ -22,6 +25,11 @@ import top.mvpdark.lingxi.data.model.VlmDetectResponse
  * 所有方法均通过 multipart/form-data 上传图片二进制，响应统一反序列化为
  * 对应的数据模型。失败时用 [runCatchingCancellable] 包裹，返回带 error 字段的响应，
  * 不向调用方抛出异常，便于 UI 层直接展示错误信息。
+ *
+ * 超时策略：
+ * - 普通上传 [/api/upload]：保持全局 30 秒（足够）
+ * - VLM 检测 [/api/vlm-detect]：90 秒（AI 推理）
+ * - 图生图 [/api/image-edit[-annotated]]：120 秒（AI 生成，后端 600 秒）
  *
  * @param apiClient 共享的 API 客户端（复用 httpClient 与 json）
  */
@@ -43,8 +51,8 @@ class ImageEditRepository(
                 },
             ).body<UploadResponse>()
         }.getOrElse { e ->
-            // TODO: 对非预期异常返回通用文案，避免泄露内部信息
-            UploadResponse(success = false, error = e.message ?: "上传失败")
+            PlatformLogger.e("ImageEditRepository", "uploadImage failed", e)
+            UploadResponse(success = false, error = e.toUserMessage())
         }
     }
 
@@ -53,6 +61,8 @@ class ImageEditRepository(
      *
      * POST /api/vlm-detect，multipart 字段：file。
      * 后端返回 {success, objects: [{id, label, bbox}]}。
+     *
+     * 超时：90 秒（VLM 推理通常 10-30 秒，留足余量）。
      */
     suspend fun vlmDetect(bytes: ByteArray, fileName: String): VlmDetectResponse {
         return runCatchingCancellable {
@@ -61,10 +71,15 @@ class ImageEditRepository(
                 formData = formData {
                     appendFile("file", bytes, fileName)
                 },
-            ).body<VlmDetectResponse>()
+            ) {
+                timeout {
+                    requestTimeoutMillis = 90_000
+                    socketTimeoutMillis = 90_000
+                }
+            }.body<VlmDetectResponse>()
         }.getOrElse { e ->
-            // TODO: 对非预期异常返回通用文案，避免泄露内部信息
-            VlmDetectResponse(success = false, error = e.message ?: "检测失败")
+            PlatformLogger.e("ImageEditRepository", "vlmDetect failed", e)
+            VlmDetectResponse(success = false, error = e.toUserMessage())
         }
     }
 
@@ -73,6 +88,8 @@ class ImageEditRepository(
      *
      * POST /api/image-edit，multipart 字段：file + prompt + resolution + ratio。
      * 后端返回 {success, image: dataUrl, url}。
+     *
+     * 超时：120 秒（AI 图生图通常 15-60 秒，留足余量）。
      */
     suspend fun editImage(
         bytes: ByteArray,
@@ -90,10 +107,15 @@ class ImageEditRepository(
                     append("resolution", resolution)
                     append("ratio", ratio)
                 },
-            ).body<ImageEditResponse>()
+            ) {
+                timeout {
+                    requestTimeoutMillis = 120_000
+                    socketTimeoutMillis = 120_000
+                }
+            }.body<ImageEditResponse>()
         }.getOrElse { e ->
-            // TODO: 对非预期异常返回通用文案，避免泄露内部信息
-            ImageEditResponse(success = false, error = e.message ?: "生成失败")
+            PlatformLogger.e("ImageEditRepository", "editImage failed", e)
+            ImageEditResponse(success = false, error = e.toUserMessage())
         }
     }
 
@@ -106,6 +128,8 @@ class ImageEditRepository(
      * regions JSON 格式对齐 image-edit.js startEdit：
      * [{"id":1,"label":"猫","bbox":{"x":0.1,"y":0.2,"w":0.3,"h":0.4},
      *   "polygon":[[0.1,0.2],...],"mask_png_b64":"..."}]
+     *
+     * 超时：120 秒（SAM2 分割 + AI 图生图，耗时较长）。
      *
      * @param regions 选中的物体列表（含 polygon 与 mask_png_b64，若存在）
      */
@@ -139,10 +163,15 @@ class ImageEditRepository(
                     append("resolution", resolution)
                     append("ratio", ratio)
                 },
-            ).body<ImageEditResponse>()
+            ) {
+                timeout {
+                    requestTimeoutMillis = 120_000
+                    socketTimeoutMillis = 120_000
+                }
+            }.body<ImageEditResponse>()
         }.getOrElse { e ->
-            // TODO: 对非预期异常返回通用文案，避免泄露内部信息
-            ImageEditResponse(success = false, error = e.message ?: "生成失败")
+            PlatformLogger.e("ImageEditRepository", "editImageAnnotated failed", e)
+            ImageEditResponse(success = false, error = e.toUserMessage())
         }
     }
 
@@ -165,17 +194,19 @@ class ImageEditRepository(
         })
     }
 
-    /** 根据文件扩展名推导 MIME 类型。 */
+    /**
+     * 根据文件扩展名推导 MIME 类型。
+     *
+     * 仅返回后端 [ALLOWED_TYPES] 支持的格式（jpeg/png/webp），
+     * 其他扩展名统一兜底为 image/jpeg，避免 gif/bmp 被后端 415 拒绝。
+     */
     private fun guessContentType(fileName: String): String {
         val ext = fileName.substringAfterLast('.', "").lowercase()
         return when (ext) {
             "jpg", "jpeg" -> "image/jpeg"
             "png" -> "image/png"
             "webp" -> "image/webp"
-            "gif" -> "image/gif"
-            "bmp" -> "image/bmp"
-            // 未知扩展名使用 image/jpeg 作为兜底（最通用的图片格式），
-            // 避免 application/octet-stream 被服务端 415 拒绝
+            // 后端仅允许 jpeg/png/webp，其他统一兜底为 jpeg
             else -> "image/jpeg"
         }
     }
