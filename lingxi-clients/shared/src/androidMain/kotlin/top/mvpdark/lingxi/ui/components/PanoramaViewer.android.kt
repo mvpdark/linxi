@@ -194,7 +194,7 @@ actual fun PanoramaViewer(
     // WebViewAssetLoader：把缓存目录映射为 https://appassets.androidplatform.net/panorama/...
     val assetLoader = remember {
         WebViewAssetLoader.Builder()
-            .setPathHandler("/panorama/", object : WebViewAssetLoader.PathHandler {
+            .addPathHandler("/panorama/", object : WebViewAssetLoader.PathHandler {
                 override fun handle(path: String): WebResourceResponse? {
                     // path 去掉前缀后形如 "panorama_1234567890/panorama.png"
                     return try {
