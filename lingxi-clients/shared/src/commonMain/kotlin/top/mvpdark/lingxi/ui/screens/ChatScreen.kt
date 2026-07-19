@@ -42,6 +42,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -50,10 +51,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import org.koin.compose.viewmodel.koinViewModel
+import top.mvpdark.lingxi.core.util.formatMessageTime
+import top.mvpdark.lingxi.core.util.formatSessionTime
 import top.mvpdark.lingxi.data.model.ChatMessage
 import top.mvpdark.lingxi.ui.chat.ChatViewModel
 import top.mvpdark.lingxi.ui.components.ChatBubble
@@ -114,6 +118,9 @@ fun ChatScreen(
                         Icon(Icons.Default.Menu, contentDescription = "会话列表")
                     }
                 },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = Color.Transparent,
+                ),
             )
         },
     ) { paddingValues ->
@@ -161,7 +168,7 @@ fun ChatScreen(
                                 text = message.content,
                                 isUser = message.role == "user",
                                 images = message.images,
-                                timestamp = message.timestamp,
+                                timestamp = formatMessageTime(message.timestamp),
                             )
                         }
 
@@ -280,7 +287,7 @@ private fun SessionSidebar(
                             )
                             if (session.updatedAt.isNotBlank()) {
                                 Text(
-                                    text = session.updatedAt,
+                                    text = formatSessionTime(session.updatedAt),
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     maxLines = 1,

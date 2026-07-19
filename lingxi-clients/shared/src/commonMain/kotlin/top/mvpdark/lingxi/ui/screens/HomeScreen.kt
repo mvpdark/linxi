@@ -7,7 +7,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -33,12 +32,14 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -46,14 +47,20 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import org.koin.compose.viewmodel.koinViewModel
 import top.mvpdark.lingxi.core.util.formatDouble
+import top.mvpdark.lingxi.core.util.formatSessionTime
 import top.mvpdark.lingxi.ui.auth.AuthViewModel
 import top.mvpdark.lingxi.ui.chat.ChatViewModel
 
 /**
  * 首页。
  *
- * - 顶部导航栏：用户名 + 余额 + 退出按钮
- * - 功能卡片网格：灵感(→chat) / 改图(→image-edit) / 全景(→panorama)
+ * 设计哲学："Quiet Materiality"（沉静的物性）
+ * - 暖奶油色背景承载鼠尾草绿强调色
+ * - 2×2 功能卡片网格：深绿图标背景 + 白色图标
+ * - 最近会话列表：浅灰卡片 + 友好时间格式
+ *
+ * - 顶部导航栏：用户名 + 余额 + 退出按钮（融入背景，无分隔线）
+ * - 功能卡片网格：灵感(→chat) / 改图(→image-edit) / 全景(→panorama) / 更多
  * - 最近会话列表（前5条）
  *
  * @param authViewModel 认证 ViewModel（Koin 注入）。
@@ -83,6 +90,7 @@ fun HomeScreen(
     }
 
     Scaffold(
+        containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             TopAppBar(
                 title = {
@@ -105,15 +113,23 @@ fun HomeScreen(
                         authViewModel.logout()
                         onLoggedOut()
                     }) {
-                        Icon(Icons.AutoMirrored.Filled.Logout, contentDescription = "退出登录")
+                        Icon(
+                            Icons.AutoMirrored.Filled.Logout,
+                            contentDescription = "退出登录",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                     }
                 },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = Color.Transparent,
+                ),
             )
         },
     ) { paddingValues ->
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
+                .background(MaterialTheme.colorScheme.background)
                 .padding(paddingValues),
             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
@@ -168,6 +184,7 @@ fun HomeScreen(
                             subtitle = "敬请期待",
                             icon = Icons.Default.AutoAwesome,
                             onClick = {},
+                            enabled = false,
                         )
                     }
                 }
@@ -202,7 +219,7 @@ fun HomeScreen(
                 items(recentSessions) { session ->
                     SessionRowItem(
                         title = session.title,
-                        subtitle = session.updatedAt,
+                        subtitle = formatSessionTime(session.updatedAt),
                         onClick = { onNavigateChat(session.id) },
                     )
                 }
@@ -213,6 +230,15 @@ fun HomeScreen(
 
 /**
  * 功能卡片。
+ *
+ * 设计规范：
+ * - primaryContainer 背景（浅薄荷绿 #D4E5D4）
+ * - 20dp 大圆角
+ * - 柔和阴影（1dp）
+ * - 图标：深绿色（primary）圆角方形背景 + 白色图标
+ * - 禁用态：降低透明度
+ *
+ * @param enabled 是否启用。false 时降低视觉权重（用于"更多"等未上线功能）。
  */
 @Composable
 private fun FeatureCard(
@@ -220,6 +246,7 @@ private fun FeatureCard(
     subtitle: String,
     icon: ImageVector,
     onClick: () -> Unit,
+    enabled: Boolean = true,
 ) {
     Card(
         modifier = Modifier
@@ -229,24 +256,29 @@ private fun FeatureCard(
             containerColor = MaterialTheme.colorScheme.primaryContainer,
         ),
         shape = RoundedCornerShape(20.dp),
+        elevation = CardDefaults.cardElevation(
+            defaultElevation = if (enabled) 1.dp else 0.dp,
+        ),
     ) {
         Column(
             modifier = Modifier
                 .padding(16.dp)
                 .fillMaxSize(),
             verticalArrangement = Arrangement.SpaceBetween,
+            alpha = if (enabled) 1f else 0.5f,
         ) {
+            // 图标：深绿色圆角方形背景 + 白色图标
             Box(
                 modifier = Modifier
                     .size(40.dp)
                     .clip(RoundedCornerShape(12.dp))
-                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)),
+                    .background(MaterialTheme.colorScheme.primary),
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(
                     imageVector = icon,
                     contentDescription = title,
-                    tint = MaterialTheme.colorScheme.primary,
+                    tint = Color.White,
                 )
             }
             Column {
@@ -259,7 +291,7 @@ private fun FeatureCard(
                 Text(
                     text = subtitle,
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f),
+                    color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f),
                 )
             }
         }
@@ -268,6 +300,11 @@ private fun FeatureCard(
 
 /**
  * 会话列表项。
+ *
+ * 设计规范：
+ * - surfaceVariant 背景（浅米灰）
+ * - 14dp 圆角
+ * - 标题 + 友好时间格式
  */
 @Composable
 private fun SessionRowItem(
@@ -283,6 +320,7 @@ private fun SessionRowItem(
             containerColor = MaterialTheme.colorScheme.surfaceVariant,
         ),
         shape = RoundedCornerShape(14.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
     ) {
         Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
             Text(
