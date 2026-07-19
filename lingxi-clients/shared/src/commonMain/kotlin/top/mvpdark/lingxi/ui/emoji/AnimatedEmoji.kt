@@ -19,7 +19,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import lingxi_clients.shared.generated.resources.Res
-import lingxi_clients.shared.generated.resources.readBytes
 import top.mvpdark.lingxi.core.util.PlatformLogger
 
 /**

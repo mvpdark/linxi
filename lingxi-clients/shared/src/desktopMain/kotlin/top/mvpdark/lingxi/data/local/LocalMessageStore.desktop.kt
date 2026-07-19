@@ -84,8 +84,8 @@ actual class LocalMessageStore actual constructor(context: PlatformContext) {
             val fileName = "${md5(url)}.jpg"
             val file = File(imagesDir, fileName)
             file.writeBytes(bytes)
-            // 用 file.toURI() 生成合法 file URI（处理 Windows 反斜杠和空格）
-            file.toURI().toString()
+            // 生成合法 file:// URI（处理 Windows 反斜杠，确保 file:/// 前缀）
+            "file:///" + file.absolutePath.replace('\\', '/')
         }
     }
 

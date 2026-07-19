@@ -26,7 +26,6 @@ import androidx.compose.ui.viewinterop.AndroidView
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import lingxi_clients.shared.generated.resources.Res
-import lingxi_clients.shared.generated.resources.readBytes
 import java.io.File
 
 /**

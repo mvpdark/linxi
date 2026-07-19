@@ -36,7 +36,6 @@ import coil3.compose.rememberAsyncImagePainter
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import lingxi_clients.shared.generated.resources.Res
-import lingxi_clients.shared.generated.resources.readBytes
 import top.mvpdark.lingxi.core.util.PlatformLogger
 import java.awt.Desktop
 import java.io.File
