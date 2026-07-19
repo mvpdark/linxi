@@ -314,7 +314,7 @@ class ChatViewModel(
     }
 
     /** 处理单个 AgentEvent，更新 UI 状态。 */
-    private fun handleAgentEvent(sessionId: String, event: AgentEvent) {
+    private suspend fun handleAgentEvent(sessionId: String, event: AgentEvent) {
         when (event.type) {
             "auth_ok" -> Unit
             "routing" -> {

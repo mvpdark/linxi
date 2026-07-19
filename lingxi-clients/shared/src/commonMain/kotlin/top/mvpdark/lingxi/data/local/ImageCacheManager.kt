@@ -3,6 +3,7 @@ package top.mvpdark.lingxi.data.local
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
 import io.ktor.client.request.get
+import io.ktor.client.statement.bodyAsBytes
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -69,7 +70,7 @@ class ImageCacheManager(
                 url.startsWith("file://") -> url
 
                 url.startsWith("http://") || url.startsWith("https://") -> {
-                    val bytes = httpClient.get(url).body<ByteArray>()
+                    val bytes = httpClient.get(url).bodyAsBytes()
                     localStore.saveImage(url, bytes)
                 }
 
