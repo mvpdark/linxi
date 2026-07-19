@@ -2,157 +2,171 @@ package top.mvpdark.lingxi.ui.components
 
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.input.pointer.PointerEventType
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImagePainter
 import coil3.compose.rememberAsyncImagePainter
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import org.jetbrains.compose.resources.InternalResourceApi
+import org.jetbrains.compose.resources.readResourceBytes
+import top.mvpdark.lingxi.core.util.PlatformLogger
+import java.awt.Desktop
+import java.io.File
+import java.net.URI
+import java.util.Base64
 
 /**
- * Desktop 全景查看器（简化版）。
+ * Desktop 全景查看器。
  *
- * 背景：Compose Multiplatform Desktop 环境下 `org.jetbrains.skia` 的
- * `RuntimeShader` / `TileMode` / `FilterMode` / `nativeCanvas` /
- * `makeFromEncodedBytes` 等 API 不可用（CI 报 Unresolved reference），
- * 因此改用纯 Compose Canvas + Coil3 标准 API 实现：
+ * 由于 Compose Desktop 环境无法直接运行 WebGL（JCEF/JavaFX 依赖过重，
+ * 且 jlink 打包复杂），采用「浏览器打开」方案：
  *
- * - Coil3 [rememberAsyncImagePainter] 加载图片（支持 data URL / http(s) URL / file 路径）
- * - 水平拖动浏览 360° 全景（[detectTransformGestures] 的 pan，ContentScale.FillHeight）
- * - 鼠标滚轮缩放（PointerEventType.Scroll），范围 1x ~ 4x
- * - 触控板双指缩放（detectTransformGestures 的 zoom）
- * - 加载中显示 CircularProgressIndicator，失败显示错误文字
- * - 黑色背景（Noir Aurum 风格）
- *
- * 不依赖任何 `org.jetbrains.skia.*` API，仅使用 Compose Multiplatform + Coil3 标准 API。
+ * 1. 将 Pannellum + 全景图（base64）内联到一个自包含 HTML 文件
+ * 2. 用系统默认浏览器打开该 HTML 文件（浏览器支持完整 WebGL）
+ * 3. Compose UI 中显示静态预览 + "已在浏览器中打开" 提示
  *
  * @param imageUrl 全景图 URL（data URL 或 http URL）
  * @param modifier 修饰符
  */
+@OptIn(InternalResourceApi::class)
 @Composable
 actual fun PanoramaViewer(
     imageUrl: String,
     modifier: Modifier,
 ) {
-    // 缩放与水平偏移状态
-    var zoom by remember { mutableFloatStateOf(MIN_ZOOM) }
-    var offsetX by remember { mutableFloatStateOf(0f) }
+    var browserOpened by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+    var htmlFile by remember { mutableStateOf<File?>(null) }
+
+    // 准备 HTML 文件并在浏览器中打开
+    LaunchedEffect(imageUrl) {
+        if (imageUrl.isEmpty()) return@LaunchedEffect
+        error = null
+        browserOpened = false
+        withContext(Dispatchers.IO) {
+            try {
+                val file = prepareSelfContainedHtml(imageUrl)
+                htmlFile = file
+                openInBrowser(file)
+                browserOpened = true
+            } catch (e: Exception) {
+                PlatformLogger.e("PanoramaViewer", "Failed to open panorama in browser", e)
+                error = "打开全景图失败: ${e.message}"
+            }
+        }
+    }
 
     val painter = rememberAsyncImagePainter(imageUrl)
     val state by painter.state.collectAsState()
 
     Box(
-        modifier = modifier
-            .background(Color.Black)
-            .clipToBounds(),
+        modifier = modifier.background(Color.Black),
     ) {
+        // 静态预览图
         when (val s = state) {
-            is AsyncImagePainter.State.Empty,
-            is AsyncImagePainter.State.Loading -> {
+            is AsyncImagePainter.State.Success -> {
+                Image(
+                    painter = painter,
+                    contentDescription = "全景图预览",
+                    alignment = Alignment.Center,
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+            is AsyncImagePainter.State.Loading,
+            AsyncImagePainter.State.Empty -> {
                 Box(
                     modifier = Modifier.fillMaxSize(),
                     contentAlignment = Alignment.Center,
                 ) {
-                    CircularProgressIndicator(
-                        color = Color.White,
-                        strokeWidth = 3.dp,
-                    )
+                    CircularProgressIndicator(color = Color.White, strokeWidth = 3.dp)
                 }
             }
-
             is AsyncImagePainter.State.Error -> {
                 Box(
-                    modifier = Modifier.fillMaxSize().padding(16.dp),
+                    modifier = Modifier.fillMaxSize(),
                     contentAlignment = Alignment.Center,
                 ) {
+                    Text("预览加载失败", color = Color.White)
+                }
+            }
+        }
+
+        // 底部状态提示
+        Column(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .background(Color(0xAA000000))
+                .padding(16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+        ) {
+            when {
+                error != null -> {
                     Text(
-                        text = "全景图加载失败",
-                        color = Color.White,
+                        text = error!!,
+                        color = Color.Red,
+                        style = MaterialTheme.typography.bodySmall,
                         textAlign = TextAlign.Center,
                     )
                 }
-            }
-
-            is AsyncImagePainter.State.Success -> {
-                val image = s.result.image
-                val imgW = image.width
-                val imgH = image.height
-
-                BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
-                    val containerW = constraints.maxWidth.toFloat()
-                    val containerH = constraints.maxHeight.toFloat()
-                    // ContentScale.FillHeight：图片高度撑满容器高度，宽度按原始比例缩放
-                    // width/height 可能为 -1（无固有尺寸），此时回退到容器宽度（无水平滚动）
-                    val drawnW = if (imgW > 0 && imgH > 0) {
-                        containerH * imgW.toFloat() / imgH.toFloat()
-                    } else {
-                        containerW
-                    }
-                    // 当前缩放下，图片居中后允许的最大水平平移距离（避免拖出可视区域）
-                    val maxPan = ((drawnW * zoom - containerW) / 2f).coerceAtLeast(0f)
-                    val clampedOffset = offsetX.coerceIn(-maxPan, maxPan)
-
-                    Image(
-                        painter = painter,
-                        contentDescription = "全景图",
-                        alignment = Alignment.Center,
-                        contentScale = ContentScale.FillHeight,
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .graphicsLayer(
-                                translationX = clampedOffset,
-                                scaleX = zoom,
-                                scaleY = zoom,
-                            )
-                            // 水平拖动 / 触控板双指缩放
-                            .pointerInput(drawnW, containerW) {
-                                detectTransformGestures { _, pan, zoomChange, _ ->
-                                    val newZoom = (zoom * zoomChange).coerceIn(MIN_ZOOM, MAX_ZOOM)
-                                    val newMaxPan =
-                                        ((drawnW * newZoom - containerW) / 2f).coerceAtLeast(0f)
-                                    zoom = newZoom
-                                    offsetX = (offsetX + pan.x).coerceIn(-newMaxPan, newMaxPan)
-                                }
+                browserOpened -> {
+                    Text(
+                        text = "360° 全景图已在浏览器中打开",
+                        color = Color.White,
+                        style = MaterialTheme.typography.bodyMedium,
+                        textAlign = TextAlign.Center,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Button(
+                        onClick = {
+                            htmlFile?.let { file ->
+                                runCatching { openInBrowser(file) }
+                                    .onFailure { error = "重新打开失败: ${it.message}" }
                             }
-                            // 鼠标滚轮缩放（消费事件，避免外层 LazyColumn 同步滚动）
-                            .pointerInput(drawnW, containerW) {
-                                awaitPointerEventScope {
-                                    while (true) {
-                                        val event = awaitPointerEvent()
-                                        if (event.type != PointerEventType.Scroll) continue
-                                        val change = event.changes.firstOrNull() ?: continue
-                                        val delta = change.scrollDelta.y
-                                        if (delta == 0f) continue
-                                        val newZoom = (zoom - delta * SCROLL_ZOOM_FACTOR)
-                                            .coerceIn(MIN_ZOOM, MAX_ZOOM)
-                                        val newMaxPan =
-                                            ((drawnW * newZoom - containerW) / 2f)
-                                                .coerceAtLeast(0f)
-                                        zoom = newZoom
-                                        offsetX = offsetX.coerceIn(-newMaxPan, newMaxPan)
-                                        change.consume()
-                                    }
-                                }
-                            },
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.primary,
+                        ),
+                        shape = RoundedCornerShape(12.dp),
+                    ) {
+                        Text("重新打开")
+                    }
+                }
+                else -> {
+                    Text(
+                        text = "正在准备 360° 全景图...",
+                        color = Color.White,
+                        style = MaterialTheme.typography.bodySmall,
                     )
                 }
             }
@@ -160,6 +174,128 @@ actual fun PanoramaViewer(
     }
 }
 
-private const val MIN_ZOOM = 1f
-private const val MAX_ZOOM = 4f
-private const val SCROLL_ZOOM_FACTOR = 0.1f
+/**
+ * 准备自包含 HTML 文件（pannellum + base64 图片全部内联）。
+ */
+@OptIn(InternalResourceApi::class)
+private suspend fun prepareSelfContainedHtml(imageUrl: String): File {
+    // 1. 读取 pannellum.js 和 pannellum.css
+    val jsCode = readResourceBytes("files/panorama/pannellum.js").decodeToString()
+    val cssCode = readResourceBytes("files/panorama/pannellum.css").decodeToString()
+
+    // 2. 读取全景图字节并转 base64
+    val imageBytes = readImageBytes(imageUrl)
+    val base64Str = Base64.getEncoder().encodeToString(imageBytes)
+
+    // 3. 构建自包含 HTML
+    val html = """<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>360° Panorama - 灵犀</title>
+<style>
+$cssCode
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { width: 100%; height: 100%; overflow: hidden; background: #000; }
+#viewer { width: 100vw; height: 100vh; }
+.hint {
+  position: absolute; bottom: 16px; left: 50%; transform: translateX(-50%);
+  color: rgba(255,255,255,0.8); font-size: 14px; font-family: -apple-system, sans-serif;
+  background: rgba(0,0,0,0.4); padding: 6px 14px; border-radius: 16px;
+  pointer-events: none; z-index: 10;
+}
+</style>
+</head>
+<body>
+<div id="viewer"></div>
+<div class="hint" id="hint">拖动画面查看 360° 视角</div>
+<script>
+// pannellum.js 内联
+$jsCode
+</script>
+<script>
+var viewer = null;
+function base64ToBlobUrl(base64) {
+  var pure = base64;
+  if (pure.indexOf(',') !== -1) pure = pure.split(',')[1];
+  var bytes = atob(pure);
+  var arr = new Uint8Array(bytes.length);
+  for (var i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i);
+  return URL.createObjectURL(new Blob([arr], { type: 'image/jpeg' }));
+}
+(function() {
+  var base64 = "data:image/jpeg;base64,$base64Str";
+  var blobUrl = base64ToBlobUrl(base64);
+  viewer = pannellum.viewer('viewer', {
+    type: 'equirectangular',
+    panorama: blobUrl,
+    autoLoad: true,
+    showZoomCtrl: true,
+    showFullscreenCtrl: true,
+    compass: false,
+    minHfov: 50,
+    maxHfov: 120,
+    friction: 0.15
+  });
+  viewer.on('loadError', function() {
+    document.getElementById('hint').textContent = '全景图加载失败';
+  });
+  viewer.on('error', function() {
+    document.getElementById('hint').textContent = '全景图加载失败';
+  });
+  document.getElementById('viewer').addEventListener('mousedown', function() {
+    var h = document.getElementById('hint');
+    if (h) h.style.display = 'none';
+  }, { once: true });
+})();
+</script>
+</body>
+</html>"""
+
+    // 4. 写入临时文件
+    val tempFile = File.createTempFile("panorama_", ".html")
+    tempFile.writeText(html)
+    tempFile.deleteOnExit()
+    return tempFile
+}
+
+/**
+ * 读取图片字节。
+ */
+private suspend fun readImageBytes(imageUrl: String): ByteArray {
+    return withContext(Dispatchers.IO) {
+        when {
+            imageUrl.startsWith("data:") -> {
+                val base64Data = imageUrl.substringAfter("base64,")
+                Base64.getDecoder().decode(base64Data)
+            }
+            imageUrl.startsWith("file://") -> {
+                val path = imageUrl.removePrefix("file://")
+                File(path).readBytes()
+            }
+            imageUrl.startsWith("http://") || imageUrl.startsWith("https://") -> {
+                val url = URI(imageUrl).toURL()
+                url.openStream().use { it.readBytes() }
+            }
+            else -> {
+                try {
+                    File(imageUrl).readBytes()
+                } catch (e: Exception) {
+                    throw IllegalArgumentException("无法识别的图片URL格式: $imageUrl", e)
+                }
+            }
+        }
+    }
+}
+
+/**
+ * 在系统默认浏览器中打开文件。
+ */
+private fun openInBrowser(file: File) {
+    if (Desktop.isDesktopSupported() && Desktop.getDesktop().isSupported(Desktop.Action.BROWSE)) {
+        Desktop.getDesktop().browse(file.toURI())
+    } else {
+        throw UnsupportedOperationException("当前系统不支持自动打开浏览器，请手动打开: ${file.absolutePath}")
+    }
+}

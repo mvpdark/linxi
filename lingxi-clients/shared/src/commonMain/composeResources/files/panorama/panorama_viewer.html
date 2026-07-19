@@ -20,21 +20,82 @@ html, body { width: 100%; height: 100%; overflow: hidden; background: #000; }
 <body>
 <div id="viewer"></div>
 <div class="hint" id="hint">拖动画面查看 360 视角</div>
+<!-- panorama_data.js 设置 window.__panoramaBase64，必须在 pannellum.js 之前加载 -->
+<script src="panorama_data.js"></script>
 <script src="pannellum.js"></script>
 <script>
 var viewer = null;
-var hintTimer = null;
 
-// 由 Kotlin 调用：加载全景图
+// base64 转 blob: URL（blob: URL 是同源的，XHR 可以可靠加载；
+// file:// URL 在 Android WebView 中 XHR responseType="blob" 返回 null，导致白屏）
+function base64ToBlobUrl(base64) {
+  var pure = base64;
+  if (pure.indexOf(',') !== -1) {
+    pure = pure.split(',')[1];
+  }
+  var bytes = atob(pure);
+  var arr = new Uint8Array(bytes.length);
+  for (var i = 0; i < bytes.length; i++) {
+    arr[i] = bytes.charCodeAt(i);
+  }
+  return URL.createObjectURL(new Blob([arr], { type: 'image/jpeg' }));
+}
+
+// 由 Kotlin 调用：从 base64 数据加载全景图
+window.__loadPanoramaFromBase64 = function() {
+  if (typeof pannellum === 'undefined') {
+    document.getElementById('hint').textContent = '全景查看器加载失败';
+    console.error('pannellum undefined');
+    return;
+  }
+  if (!window.__panoramaBase64) {
+    document.getElementById('hint').textContent = '全景图数据未加载';
+    console.error('window.__panoramaBase64 not set');
+    return;
+  }
+  try {
+    var blobUrl = base64ToBlobUrl(window.__panoramaBase64);
+    console.log('Created blob URL: ' + blobUrl.substring(0, 50) + '...');
+    if (viewer) { viewer.destroy(); viewer = null; }
+    var el = document.getElementById('viewer');
+    if (!el) return;
+    viewer = pannellum.viewer(el, {
+      type: 'equirectangular',
+      panorama: blobUrl,
+      autoLoad: true,
+      showZoomCtrl: false,
+      showFullscreenCtrl: true,
+      compass: false,
+      minHfov: 50,
+      maxHfov: 120,
+      friction: 0.15
+    });
+    viewer.on('loadError', function() {
+      document.getElementById('hint').textContent = '全景图加载失败';
+      console.error('pannellum loadError');
+    });
+    viewer.on('error', function(e) {
+      document.getElementById('hint').textContent = '全景图加载失败';
+      console.error('pannellum error: ' + JSON.stringify(e));
+    });
+    el.addEventListener('mousedown', hideHint, { once: true });
+    el.addEventListener('touchstart', hideHint, { once: true });
+  } catch (e) {
+    document.getElementById('hint').textContent = '全景图加载失败: ' + e.message;
+    console.error('Exception: ' + e.message);
+  }
+};
+
+// 保留原始接口（直接传 URL），用于后备
 window.__loadPanorama = function(url) {
   if (typeof pannellum === 'undefined') {
     document.getElementById('hint').textContent = '全景查看器加载失败';
     return;
   }
-  if (viewer) { viewer.destroy(); viewer = null; }
-  var el = document.getElementById('viewer');
-  if (!el) return;
   try {
+    if (viewer) { viewer.destroy(); viewer = null; }
+    var el = document.getElementById('viewer');
+    if (!el) return;
     viewer = pannellum.viewer(el, {
       type: 'equirectangular',
       panorama: url,
@@ -52,7 +113,6 @@ window.__loadPanorama = function(url) {
     viewer.on('error', function() {
       document.getElementById('hint').textContent = '全景图加载失败';
     });
-    // 首次交互后隐藏提示
     el.addEventListener('mousedown', hideHint, { once: true });
     el.addEventListener('touchstart', hideHint, { once: true });
   } catch (e) {
@@ -65,10 +125,17 @@ function hideHint() {
   if (h) h.style.display = 'none';
 }
 
-// 由 Kotlin 调用：销毁查看器（释放资源）
 window.__destroyPanorama = function() {
   if (viewer) { viewer.destroy(); viewer = null; }
 };
+
+// 页面加载完成后自动从 base64 初始化全景图
+window.addEventListener('load', function() {
+  console.log('Page loaded, __panoramaBase64 available: ' + (!!window.__panoramaBase64));
+  if (window.__panoramaBase64) {
+    window.__loadPanoramaFromBase64();
+  }
+});
 </script>
 </body>
 </html>

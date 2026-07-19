@@ -266,9 +266,19 @@ actual class SamService actual constructor(@Suppress("UNUSED_PARAMETER") context
                         maskBytes[j] = if (scratch[j] > 0f) 1 else 0
                     }
 
+                    // 裁剪 pad 区域：低分辨率 mask 对应 1024×1024 padded 输入，
+                    // 实际内容只占 reshapedW/1024 × reshapedH/1024 的区域
+                    val lowScale = wLow.toFloat() / 1024f
+                    val effW = maxOf(1, (reshapedW * lowScale).toInt().coerceAtMost(wLow))
+                    val effH = maxOf(1, (reshapedH * lowScale).toInt().coerceAtMost(hLow))
+                    val cropped = ByteArray(effW * effH)
+                    for (y in 0 until effH) {
+                        System.arraycopy(maskBytes, y * wLow, cropped, y * effW, effW)
+                    }
+
                     // 上采样到原图尺寸
                     val upsampled = MaskPostProcessor.upsampleMask(
-                        maskBytes, wLow, hLow, origW, origH,
+                        cropped, effW, effH, origW, origH,
                     )
 
                     // 提取多边形轮廓

@@ -61,6 +61,7 @@ import top.mvpdark.lingxi.ui.panorama.PanoramaViewModel
 @Composable
 fun PanoramaScreen(
     viewModel: PanoramaViewModel = koinViewModel(),
+    onBack: () -> Unit = {},
 ) {
     val state by viewModel.uiState.collectAsState()
     val launchPicker = rememberImagePickerLauncher { bytes ->
@@ -83,6 +84,14 @@ fun PanoramaScreen(
                         IconButton(onClick = viewModel::resetAll) {
                             Icon(Icons.Default.Refresh, contentDescription = "换一张图")
                         }
+                    }
+                },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "返回",
+                        )
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(

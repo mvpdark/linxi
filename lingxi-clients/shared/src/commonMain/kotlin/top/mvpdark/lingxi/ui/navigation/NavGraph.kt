@@ -98,7 +98,9 @@ fun NavGraph() {
         }
 
         composable(Routes.PANORAMA) {
-            PanoramaScreen()
+            PanoramaScreen(
+                onBack = { navController.popBackStack() },
+            )
         }
 
         composable(Routes.SETTINGS) {
