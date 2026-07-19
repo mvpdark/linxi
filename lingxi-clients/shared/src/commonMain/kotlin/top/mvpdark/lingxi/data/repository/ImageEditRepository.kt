@@ -158,9 +158,9 @@ class ImageEditRepository(
      * @param onError 错误回调，接收本地化错误文案，返回带 error 字段的默认对象
      * @param block 请求执行块
      */
-    private suspend fun <T> requestWithAuthRetry(
-        onError: (String) -> T,
-        block: suspend () -> HttpResponse,
+    private suspend inline fun <reified T> requestWithAuthRetry(
+        noinline onError: (String) -> T,
+        noinline block: suspend () -> HttpResponse,
     ): T {
         // 第一次尝试
         val firstResponse = try {
@@ -173,7 +173,7 @@ class ImageEditRepository(
         // 成功：反序列化
         if (firstResponse.status.isSuccess()) {
             return try {
-                firstResponse.body()
+                firstResponse.body<T>()
             } catch (e: Exception) {
                 PlatformLogger.e("ImageEditRepository", "Parse failed", e)
                 onError(e.toUserMessage())
@@ -193,7 +193,7 @@ class ImageEditRepository(
                 }
                 if (retryResponse.status.isSuccess()) {
                     return try {
-                        retryResponse.body()
+                        retryResponse.body<T>()
                     } catch (e: Exception) {
                         onError(e.toUserMessage())
                     }

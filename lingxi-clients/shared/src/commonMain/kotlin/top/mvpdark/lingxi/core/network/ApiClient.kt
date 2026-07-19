@@ -154,7 +154,7 @@ class ApiClient(
                 if (body.refreshToken.isNotBlank()) {
                     tokenStore.setRefreshToken(body.refreshToken)
                 }
-                PlatformLogger.i("ApiClient", "Token refreshed successfully")
+                PlatformLogger.d("ApiClient", "Token refreshed successfully")
                 true
             } catch (e: Exception) {
                 PlatformLogger.e("ApiClient", "Refresh token exception", e)
