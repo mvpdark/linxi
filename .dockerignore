@@ -40,11 +40,6 @@ src/checkpoints/*.pt
 src/sam2_src/*
 !src/sam2_src/sam2/
 
-# -- 前端 / 客户端工程（后端运行时无关） ----------------------------------------
-frontend-capacitor/
-frontend-tauri/
-src-tauri/
-
 # -- 部署模板 / 文档 / 截图 / 脚本等根目录杂物 -----------------------------------
 unraid/
 screenshots/

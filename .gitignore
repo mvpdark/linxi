@@ -7,7 +7,6 @@ build/
 target/
 
 # ===== 敏感配置 =====
-src/static/config.json
 config.yaml
 config.example.yaml
 
@@ -37,9 +36,6 @@ src/checkpoints/
 *.bin
 *.safetensors
 
-# ===== 前端打包模型（体积大，不进 git，通过 cap sync 打包） =====
-src/static/models/
-
 # ===== 数据库迁移 =====
 # alembic/ 和 alembic.ini 需要进 git（Dockerfile COPY alembic/）
 
@@ -49,9 +45,6 @@ src/cache/
 
 # ===== 资源目录（可能含大文件） =====
 assets/
-# 例外：APNG 动画头像（需打包进 APK）
-!src/static/assets/
-!src/static/assets/**
 
 # ===== 设计文件 =====
 design/
@@ -62,9 +55,3 @@ design/
 # ===== 操作系统文件 =====
 .DS_Store
 Thumbs.db
-
-# ===== Capacitor 构建产物 =====
-frontend-capacitor/node_modules/
-frontend-capacitor/android/build/
-frontend-capacitor/android/app/build/
-frontend-capacitor/android/.gradle/

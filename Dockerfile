@@ -51,8 +51,8 @@ COPY alembic.ini /app/alembic.ini
 #    同时包含 /app/src，使 server.py 的 `from utils.xxx import` 能正确解析
 ENV PYTHONPATH=/app/src:/app/src/sam2_src
 
-# 4) 运行期目录（server.py 导入时会 mkdir static/assets；非 root 运行需预先授权）
-RUN mkdir -p /app/assets /app/src/static/css /app/src/static/js /app/src/checkpoints \
+# 4) 运行期目录（非 root 运行需预先授权）
+RUN mkdir -p /app/assets /app/src/checkpoints \
     && chown -R lingxi:lingxi /app
 
 # 5) 启动脚本：ensure_schema 建表后再启动 uvicorn；sed 兼容 Windows CRLF 行尾，

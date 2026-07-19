@@ -10,9 +10,9 @@ import androidx.compose.ui.Modifier
  *   通过 `window.__loadPanorama(url)` JS 桥接注入全景图 URL。
  * - Desktop：暂时降级为静态图片展示（Desktop 后续可接 JCEF）。
  *
- * 复用 Web 端 `src/static/vendor/pannellum.js` + `pannellum.css`，保证三端体验一致。
+ * Pannellum 资源打包在 KMP resources（composeResources/files/panorama/）。
  *
- * @param imageUrl 全景图 URL（data URL 或 http URL，与 Web 端 initPannellum 入参格式一致）
+ * @param imageUrl 全景图 URL（data URL 或 http URL）
  * @param modifier 修饰符
  */
 @Composable

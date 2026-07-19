@@ -18,6 +18,9 @@
 # ===========================================================================
 set -e
 
+# 纯 API 模式：不托管前端静态文件（Web 前端已移除，全部使用原生客户端）
+export SERVE_FRONTEND="${SERVE_FRONTEND:-false}"
+
 python -m src.db.ensure_schema
 
 # 资源目录可写检测（Unraid 卷挂载常见权限问题，提前失败并给出修复指引）

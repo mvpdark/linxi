@@ -82,7 +82,7 @@ class Config:
     precharge_panorama: float = 0.5   # 全景图预扣费（元/次）
 
     # 阶段5：纯 API 模式开关（False 时不托管前端静态文件，仅提供 REST/WebSocket/图片代理）
-    serve_frontend: bool = True
+    serve_frontend: bool = False
     # CORS 允许来源列表（默认 ["*"]；含 * 时 credentials 自动关闭）
     cors_origins: list = field(default_factory=lambda: ["*"])
 
@@ -166,7 +166,7 @@ class Config:
             precharge_image=data.get("precharge_image", cls.precharge_image),
             precharge_vlm=data.get("precharge_vlm", cls.precharge_vlm),
             precharge_panorama=data.get("precharge_panorama", cls.precharge_panorama),
-            serve_frontend=bool(data.get("serve_frontend", True)),
+            serve_frontend=bool(data.get("serve_frontend", False)),
             cors_origins=cors_origins,
             agents=agents_cfg,
             tavily=TavilyConfig(

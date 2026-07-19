@@ -38,7 +38,6 @@ COPY src/__init__.py src/server.py src/config.py /app/src/
 COPY src/services      /app/src/services
 COPY src/utils         /app/src/utils
 COPY src/models        /app/src/models
-COPY src/static        /app/src/static
 COPY src/sam2_src/sam2 /app/src/sam2_src/sam2
 
 # 3) 将 sam2 包暴露到 import 路径（等价 pip install -e，但跳过 CUDA 扩展编译）

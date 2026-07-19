@@ -422,9 +422,7 @@ jobs:
         run: |
           mkdir -p release-assets
 
-          VERSION="v1.0.${{ github.run_number }}"
-
-          # 递归查找文件（upload-artifact 保留了完整路径结构，文件在深层子目录）
+          # 固定文件名（不带版本号，每次覆盖）
           copy_asset() {
             local artifact_dir="$1"
             local pattern="$2"
@@ -442,60 +440,40 @@ jobs:
               cp "$found_file" "release-assets/$output_name"
               local size_mb
               size_mb=$(du -m "release-assets/$output_name" | cut -f1)
-              echo "✓ $label: $output_name (${size_mb} MB) ← $(basename "$found_file")"
+              echo "✓ $label: $output_name (${size_mb} MB)"
             else
               echo "✗ $label: no $pattern found in $artifact_dir"
-              # Debug: show what's actually in the directory
-              echo "  Contents:"
-              find "$artifact_dir" -type f | head -5 | while read -r f; do
-                echo "    $f"
-              done
             fi
           }
 
-          copy_asset "artifacts/lingxi-android-release" "*.apk" "lingxi-android-${VERSION}.apk" "Release APK"
-          copy_asset "artifacts/lingxi-desktop-msi" "*.msi" "lingxi-desktop-${VERSION}.msi" "Desktop MSI"
-          copy_asset "artifacts/lingxi-desktop-exe" "*.exe" "lingxi-desktop-portable-${VERSION}.exe" "Desktop EXE"
-          copy_asset "artifacts/lingxi-desktop-dmg-arm64" "*.dmg" "lingxi-desktop-macos-arm64-${VERSION}.dmg" "macOS ARM64 DMG"
-          copy_asset "artifacts/lingxi-desktop-dmg-x64" "*.dmg" "lingxi-desktop-macos-x64-${VERSION}.dmg" "macOS Intel DMG"
-          copy_asset "artifacts/lingxi-ios-framework" "*.zip" "lingxi-ios-framework-${VERSION}.zip" "iOS Framework"
+          copy_asset "artifacts/lingxi-android-release" "*.apk" "lingxi-android.apk" "Android APK"
+          copy_asset "artifacts/lingxi-desktop-msi" "*.msi" "lingxi-windows.msi" "Windows MSI"
+          copy_asset "artifacts/lingxi-desktop-exe" "*.exe" "lingxi-windows-portable.exe" "Windows EXE"
+          copy_asset "artifacts/lingxi-desktop-dmg-arm64" "*.dmg" "lingxi-macos-arm64.dmg" "macOS ARM64 DMG"
 
           echo "=== Release assets ==="
           ls -la release-assets/
 
-          # 验证至少有 APK + MSI（其他可选）
-          asset_count=$(ls -1 release-assets/ 2>/dev/null | wc -l)
-          if [ "$asset_count" -lt 2 ]; then
-            echo "ERROR: Expected at least 2 assets (APK + MSI), got $asset_count"
-            exit 1
-          fi
-
-      - name: Generate release tag
-        id: tag
-        run: |
-          TAG="v1.0.${{ github.run_number }}"
-          echo "tag=$TAG" >> $GITHUB_OUTPUT
-          echo "Generated tag: $TAG"
-
-      - name: Create GitHub Release
+      - name: Publish to GitHub Release (latest, always overwrite)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release create "${{ steps.tag.outputs.tag }}" \
-            --title "灵犀 Native Client ${{ steps.tag.outputs.tag }}" \
-            --notes "## 自动构建发布
+          # 删除旧的 latest release（如果存在）
+          gh release delete latest --yes --cleanup-tag 2>/dev/null || true
+
+          # 创建新的 latest release
+          gh release create latest \
+            --title "灵犀 - 最新版本" \
+            --notes "## 灵犀 最新版本
 
           **Commit:** ${{ github.sha }}
           **构建时间:** $(date -u '+%Y-%m-%d %H:%M UTC')
-          **版本号:** ${{ github.run_number }}
 
           ### 下载说明
-          - **Android**: 下载 \`lingxi-android-v1.0.${{ github.run_number }}.apk\`，允许安装未知来源后安装
-          - **Windows 安装版**: 下载 \`lingxi-desktop-v1.0.${{ github.run_number }}.msi\`，双击安装
-          - **Windows 便携版**: 下载 \`lingxi-desktop-portable-v1.0.${{ github.run_number }}.exe\`，无需安装直接运行
-          - **macOS Apple Silicon (M1/M2/M3/M4)**: 下载 \`lingxi-desktop-macos-arm64-v1.0.${{ github.run_number }}.dmg\`
+          - **Android**: 下载 \`lingxi-android.apk\`
+          - **Windows 安装版**: 下载 \`lingxi-windows.msi\`
+          - **Windows 便携版**: 下载 \`lingxi-windows-portable.exe\`
+          - **macOS Apple Silicon**: 下载 \`lingxi-macos-arm64.dmg\`
 
-          > 如已安装旧版本，可直接覆盖安装（签名一致）。
-          > macOS 用户首次打开可能需要右键选择「打开」以绕过 Gatekeeper。
-          > Intel Mac 和 iOS 暂未提供，后续版本支持。" \
+          > 每次构建都会覆盖此 release，始终只保留最新版本。" \
             release-assets/*

@@ -61,10 +61,8 @@ sys.path.insert(0, str(_SRC_DIR))
 # 项目根目录加入 sys.path，支持 src.* 包形式导入（src.db / src.utils）
 sys.path.insert(0, str(_BASE_DIR))
 
-# 确保目录存在
-_STATIC_DIR.mkdir(parents=True, exist_ok=True)
-(_STATIC_DIR / "css").mkdir(exist_ok=True)
-(_STATIC_DIR / "js").mkdir(exist_ok=True)
+# 确保目录存在（_STATIC_DIR 仅在 serve_frontend=True 时才需要，
+# 推迟到 config 加载后的静态文件挂载块中创建，避免纯 API 模式下重建空目录）
 _ASSETS_DIR.mkdir(parents=True, exist_ok=True)
 
 # 图片处理工具（压缩/缩放）
@@ -1938,6 +1936,9 @@ else:
 
 # 挂载前端静态文件（CSS/JS）— no-cache 响应头由 add_cache_control 中间件统一设置
 if config.serve_frontend:
+    _STATIC_DIR.mkdir(parents=True, exist_ok=True)
+    (_STATIC_DIR / "css").mkdir(exist_ok=True)
+    (_STATIC_DIR / "js").mkdir(exist_ok=True)
     app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
     # HTML 使用相对路径（css/xxx, js/xxx, vendor/xxx），需将子目录挂载到根路径
     for _sub in ("css", "js", "vendor", "assets"):
