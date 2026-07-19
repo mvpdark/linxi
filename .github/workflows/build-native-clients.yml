@@ -315,6 +315,7 @@ jobs:
 
   build-ios:
     name: Build iOS Framework
+    if: false  # 暂时禁用，iOS P0 代码保留待 macOS 环境调试
     runs-on: macos-latest
     env:
       LINGXI_VERSION_NAME: "1.0.${{ github.run_number }}"
@@ -365,7 +366,7 @@ jobs:
 
   release:
     name: Publish to GitHub Releases
-    needs: [build-android, build-desktop, build-desktop-macos-arm64, build-desktop-macos-intel, build-ios]
+    needs: [build-android, build-desktop, build-desktop-macos-arm64, build-desktop-macos-intel]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:

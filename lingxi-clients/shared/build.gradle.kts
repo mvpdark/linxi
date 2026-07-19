@@ -23,10 +23,11 @@ kotlin {
         }
     }
 
-    // iOS targets
-    val iosArm64Target = iosArm64()
-    val iosX64Target = iosX64()
-    val iosSimulatorArm64Target = iosSimulatorArm64()
+    // iOS targets — 暂时禁用，iOS 源集代码保留待 macOS 环境调试
+    // 启用方法：取消下面注释，并确保 iosMain 源集用 creating 而非 getting
+    // val iosArm64Target = iosArm64()
+    // val iosX64Target = iosX64()
+    // val iosSimulatorArm64Target = iosSimulatorArm64()
 
     sourceSets {
         commonMain.dependencies {
@@ -87,11 +88,12 @@ kotlin {
             }
         }
 
-        val iosMain by getting {
-            dependencies {
-                implementation(libs.ktor.client.darwin)
-            }
-        }
+        // iOS 源集 — 暂时禁用（与 iOS target 一起注释）
+        // val iosMain by getting {
+        //     dependencies {
+        //         implementation(libs.ktor.client.darwin)
+        //     }
+        // }
 
         commonTest {
             dependencies {
@@ -100,13 +102,13 @@ kotlin {
         }
     }
 
-    // iOS framework: exported as "ComposeApp" for Xcode integration
-    listOf(iosArm64Target, iosX64Target, iosSimulatorArm64Target).forEach { target ->
-        target.binaries.framework {
-            baseName = "ComposeApp"
-            isStatic = true
-        }
-    }
+    // iOS framework — 暂时禁用
+    // listOf(iosArm64Target, iosX64Target, iosSimulatorArm64Target).forEach { target ->
+    //     target.binaries.framework {
+    //         baseName = "ComposeApp"
+    //         isStatic = true
+    //     }
+    // }
 
     @OptIn(ExperimentalKotlinGradlePluginApi::class)
     compilerOptions {
