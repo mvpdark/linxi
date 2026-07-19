@@ -33,7 +33,15 @@ actual fun rememberImagePickerLauncher(onResult: (ByteArray?) -> Unit): () -> Un
                 // 将 IO 密集的读取操作切到 Dispatchers.IO，避免阻塞 UI 线程
                 scope.launch {
                     val bytes = withContext(Dispatchers.IO) {
-                        selectedFile?.readBytes()
+                        runCatching {
+                            selectedFile?.readBytes()
+                        }.onFailure { e ->
+                            top.mvpdark.lingxi.core.util.PlatformLogger.e(
+                                "ImagePicker",
+                                "Failed to read image file: ${selectedFile?.absolutePath}",
+                                e,
+                            )
+                        }.getOrNull()
                     }
                     onResult(bytes)
                 }

@@ -37,5 +37,11 @@ actual fun rememberImagePickerLauncher(onResult: (ByteArray?) -> Unit): () -> Un
 private fun readBytesFromUri(context: Context, uri: Uri): ByteArray? {
     return runCatching {
         context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+    }.onFailure { e ->
+        top.mvpdark.lingxi.core.util.PlatformLogger.e(
+            "ImagePicker",
+            "Failed to read image from URI: $uri",
+            e,
+        )
     }.getOrNull()
 }

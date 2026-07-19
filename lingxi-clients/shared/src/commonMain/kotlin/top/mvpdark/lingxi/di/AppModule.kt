@@ -9,9 +9,11 @@ import top.mvpdark.lingxi.core.util.UrlResolver
 import top.mvpdark.lingxi.data.repository.AuthRepository
 import top.mvpdark.lingxi.data.repository.ChatRepository
 import top.mvpdark.lingxi.data.repository.ImageEditRepository
+import top.mvpdark.lingxi.data.repository.PanoramaRepository
 import top.mvpdark.lingxi.ui.auth.AuthViewModel
 import top.mvpdark.lingxi.ui.chat.ChatViewModel
 import top.mvpdark.lingxi.ui.imageedit.ImageEditViewModel
+import top.mvpdark.lingxi.ui.panorama.PanoramaViewModel
 
 /**
  * 应用级 Koin 模块：注册共享网络层、仓库与 ViewModel。
@@ -37,9 +39,11 @@ val appModule = module {
     singleOf(::AuthRepository)
     singleOf(::ChatRepository)
     singleOf(::ImageEditRepository)
+    singleOf(::PanoramaRepository)
 
     // ViewModel
     viewModel { AuthViewModel(get()) }
     viewModel { ChatViewModel(get()) }
     viewModel { ImageEditViewModel(get(), get()) }
+    viewModel { PanoramaViewModel(get()) }
 }

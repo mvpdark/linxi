@@ -169,12 +169,14 @@ class ImageEditRepository(
     private fun guessContentType(fileName: String): String {
         val ext = fileName.substringAfterLast('.', "").lowercase()
         return when (ext) {
+            "jpg", "jpeg" -> "image/jpeg"
             "png" -> "image/png"
             "webp" -> "image/webp"
             "gif" -> "image/gif"
             "bmp" -> "image/bmp"
-            // 未知扩展名使用通用二进制流，避免误传 image/jpeg
-            else -> "application/octet-stream"
+            // 未知扩展名使用 image/jpeg 作为兜底（最通用的图片格式），
+            // 避免 application/octet-stream 被服务端 415 拒绝
+            else -> "image/jpeg"
         }
     }
 }

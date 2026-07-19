@@ -17,6 +17,7 @@ import top.mvpdark.lingxi.ui.screens.ChatScreen
 import top.mvpdark.lingxi.ui.screens.HomeScreen
 import top.mvpdark.lingxi.ui.screens.ImageEditScreen
 import top.mvpdark.lingxi.ui.screens.LoginScreen
+import top.mvpdark.lingxi.ui.screens.PanoramaScreen
 import top.mvpdark.lingxi.ui.screens.PlaceholderScreen
 
 /**
@@ -97,7 +98,7 @@ fun NavGraph() {
         }
 
         composable(Routes.PANORAMA) {
-            PlaceholderScreen(title = "全景", subtitle = "360 度全景图生成（即将上线）")
+            PanoramaScreen()
         }
 
         composable(Routes.SETTINGS) {

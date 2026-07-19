@@ -290,6 +290,17 @@ class ImageEditViewModel(
                         )
                     }
                 }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                PlatformLogger.e("ImageEditViewModel", "startEdit failed", e)
+                _uiState.update {
+                    it.copy(
+                        step = Step.Edit,
+                        isEditing = false,
+                        error = e.message ?: "改图失败，请重试",
+                    )
+                }
             } finally {
                 isProcessing.value = false
             }

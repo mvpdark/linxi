@@ -251,7 +251,7 @@ private fun FeatureCard(
     Card(
         modifier = Modifier
             .height(120.dp)
-            .clickable(onClick = onClick),
+            .clickable(enabled = enabled, onClick = onClick),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.primaryContainer,
         ),
