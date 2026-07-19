@@ -21,6 +21,9 @@ jobs:
   build-android:
     name: Build Android APK
     runs-on: ubuntu-latest
+    env:
+      LINGXI_VERSION_CODE: ${{ github.run_number }}
+      LINGXI_VERSION_NAME: "1.0.${{ github.run_number }}"
     steps:
       - uses: actions/checkout@v4
 
@@ -75,39 +78,48 @@ jobs:
             print(f'  {f}: {os.path.getsize(os.path.join(out, f))/(1024*1024):.1f} MB')
           "
 
-      - name: Build Debug APK
-        run: ./gradlew :androidApp:assembleDebug
-
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: lingxi-android-debug
-          path: lingxi-clients/androidApp/build/outputs/apk/debug/*.apk
-          retention-days: 30
-
-      - name: Build Release APK (if secrets available)
-        if: env.LINGXI_KEYSTORE_BASE64 != ''
+      - name: Decode release keystore
         env:
           LINGXI_KEYSTORE_BASE64: ${{ secrets.LINGXI_KEYSTORE_BASE64 }}
+        run: |
+          if [ -z "$LINGXI_KEYSTORE_BASE64" ]; then
+            echo "ERROR: LINGXI_KEYSTORE_BASE64 secret is not configured."
+            echo "Please generate a keystore and add it to GitHub Secrets:"
+            echo "  keytool -genkeypair -v -keystore lingxi-release.jks -alias lingxi -keyalg RSA -keysize 4096 -validity 10000"
+            echo "  base64 -w 0 lingxi-release.jks"
+            exit 1
+          fi
+          echo "$LINGXI_KEYSTORE_BASE64" | base64 -d > /tmp/lingxi.keystore
+          echo "Keystore decoded successfully"
+
+      - name: Build Release APK
+        env:
+          LINGXI_KEYSTORE_PATH: /tmp/lingxi.keystore
           LINGXI_KEYSTORE_PASSWORD: ${{ secrets.LINGXI_KEYSTORE_PASSWORD }}
           LINGXI_KEY_ALIAS: ${{ secrets.LINGXI_KEY_ALIAS }}
           LINGXI_KEY_PASSWORD: ${{ secrets.LINGXI_KEY_PASSWORD }}
+        run: ./gradlew :androidApp:assembleRelease
+
+      - name: Rename APK with version
         run: |
-          echo "$LINGXI_KEYSTORE_BASE64" | base64 -d > /tmp/lingxi.keystore
-          export LINGXI_KEYSTORE_PATH=/tmp/lingxi.keystore
-          ./gradlew :androidApp:assembleRelease
+          mkdir -p release-assets
+          cp androidApp/build/outputs/apk/release/*.apk \
+            release-assets/lingxi-android-v1.0.${{ github.run_number }}.apk
+          echo "APK renamed:"
+          ls -la release-assets/
 
       - name: Upload Release APK
-        if: env.LINGXI_KEYSTORE_BASE64 != ''
         uses: actions/upload-artifact@v4
         with:
           name: lingxi-android-release
-          path: lingxi-clients/androidApp/build/outputs/apk/release/*.apk
+          path: lingxi-clients/release-assets/*.apk
           retention-days: 30
 
   build-desktop:
     name: Build Desktop MSI
     runs-on: windows-latest
+    env:
+      LINGXI_VERSION_NAME: "1.0.${{ github.run_number }}"
     steps:
       - uses: actions/checkout@v4
 
@@ -202,6 +214,8 @@ jobs:
         run: |
           mkdir -p release-assets
 
+          VERSION="v1.0.${{ github.run_number }}"
+
           # 递归查找文件（upload-artifact 保留了完整路径结构，文件在深层子目录）
           copy_asset() {
             local artifact_dir="$1"
@@ -231,13 +245,9 @@ jobs:
             fi
           }
 
-          copy_asset "artifacts/lingxi-android-debug" "*.apk" "lingxi-android-debug.apk" "Debug APK"
-          copy_asset "artifacts/lingxi-desktop-msi" "*.msi" "lingxi-desktop.msi" "Desktop MSI"
-          copy_asset "artifacts/lingxi-desktop-exe" "*.exe" "lingxi-desktop-portable.exe" "Desktop EXE"
-
-          if [ -d artifacts/lingxi-android-release ]; then
-            copy_asset "artifacts/lingxi-android-release" "*.apk" "lingxi-android-release.apk" "Release APK"
-          fi
+          copy_asset "artifacts/lingxi-android-release" "*.apk" "lingxi-android-${VERSION}.apk" "Release APK"
+          copy_asset "artifacts/lingxi-desktop-msi" "*.msi" "lingxi-desktop-${VERSION}.msi" "Desktop MSI"
+          copy_asset "artifacts/lingxi-desktop-exe" "*.exe" "lingxi-desktop-portable-${VERSION}.exe" "Desktop EXE"
 
           echo "=== Release assets ==="
           ls -la release-assets/
@@ -252,9 +262,7 @@ jobs:
       - name: Generate release tag
         id: tag
         run: |
-          DATE=$(date -u +%Y%m%d)
-          SHORT_SHA=${GITHUB_SHA::7}
-          TAG="v1.0.0-dev.${DATE}.${SHORT_SHA}"
+          TAG="v1.0.${{ github.run_number }}"
           echo "tag=$TAG" >> $GITHUB_OUTPUT
           echo "Generated tag: $TAG"
 
@@ -268,12 +276,12 @@ jobs:
 
           **Commit:** ${{ github.sha }}
           **构建时间:** $(date -u '+%Y-%m-%d %H:%M UTC')
+          **版本号:** ${{ github.run_number }}
 
           ### 下载说明
-          - **Android**: 下载 \`lingxi-android-debug.apk\`，允许安装未知来源后安装
-          - **Windows 安装版**: 下载 \`lingxi-desktop.msi\`，双击安装
-          - **Windows 便携版**: 下载 \`lingxi-desktop-portable.exe\`，无需安装直接运行
+          - **Android**: 下载 \`lingxi-android-v1.0.${{ github.run_number }}.apk\`，允许安装未知来源后安装
+          - **Windows 安装版**: 下载 \`lingxi-desktop-v1.0.${{ github.run_number }}.msi\`，双击安装
+          - **Windows 便携版**: 下载 \`lingxi-desktop-portable-v1.0.${{ github.run_number }}.exe\`，无需安装直接运行
 
-          > 这是开发版本，可能存在不稳定因素。" \
-            --prerelease \
+          > 如已安装旧版本，可直接覆盖安装（签名一致）。" \
             release-assets/*

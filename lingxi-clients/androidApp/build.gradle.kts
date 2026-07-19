@@ -36,8 +36,9 @@ android {
         applicationId = "com.mvpdark.lingxi"
         minSdk = 24
         targetSdk = 36
-        versionCode = 1
-        versionName = "1.0.0"
+        // 版本号：优先从环境变量读取（CI 注入），本地默认 1
+        versionCode = (System.getenv("LINGXI_VERSION_CODE") ?: "1").toInt()
+        versionName = System.getenv("LINGXI_VERSION_NAME") ?: "1.0.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -51,6 +52,12 @@ android {
                 storePassword = System.getenv("LINGXI_KEYSTORE_PASSWORD") ?: ""
                 keyAlias = System.getenv("LINGXI_KEY_ALIAS") ?: ""
                 keyPassword = System.getenv("LINGXI_KEY_PASSWORD") ?: ""
+            } else if (System.getenv("CI") != null) {
+                // CI 环境下必须提供正式 keystore，否则直接失败
+                throw GradleException(
+                    "CI build requires LINGXI_KEYSTORE_PATH to be set. " +
+                        "Please configure LINGXI_KEYSTORE_BASE64 secret in GitHub.",
+                )
             } else {
                 // 本地开发：使用 debug keystore
                 storeFile = signingConfigs.getByName("debug").storeFile

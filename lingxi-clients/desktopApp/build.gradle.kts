@@ -39,7 +39,8 @@ compose.desktop {
         nativeDistributions {
             targetFormats(TargetFormat.Msi, TargetFormat.Exe)
             packageName = "Lingxi"
-            packageVersion = "1.0.0"
+            // 版本号：优先从环境变量读取（CI 注入），本地默认 1.0.0
+            packageVersion = System.getenv("LINGXI_VERSION_NAME") ?: "1.0.0"
 
             windows {
                 menuGroup = "Lingxi"

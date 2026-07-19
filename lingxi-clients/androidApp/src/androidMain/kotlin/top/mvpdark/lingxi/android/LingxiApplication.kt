@@ -15,6 +15,7 @@ import top.mvpdark.lingxi.di.platformModule
  * 2. 启动 Koin，注册 appModule + platformModule
  */
 class LingxiApplication : Application() {
+
     override fun onCreate() {
         super.onCreate()
         // 注入平台 Context（PlatformContext 包装 android.content.Context）
