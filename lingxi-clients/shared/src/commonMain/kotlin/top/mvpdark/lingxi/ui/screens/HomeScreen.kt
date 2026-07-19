@@ -263,9 +263,9 @@ private fun FeatureCard(
         Column(
             modifier = Modifier
                 .padding(16.dp)
-                .fillMaxSize(),
+                .fillMaxSize()
+                .alpha(if (enabled) 1f else 0.5f),
             verticalArrangement = Arrangement.SpaceBetween,
-            alpha = if (enabled) 1f else 0.5f,
         ) {
             // 图标：深绿色圆角方形背景 + 白色图标
             Box(

@@ -18,7 +18,7 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
-import org.jetbrains.compose.resources.ExperimentalResourceApi
+import org.jetbrains.compose.resources.InternalResourceApi
 import org.jetbrains.compose.resources.readResourceBytes
 
 /**
@@ -36,7 +36,7 @@ import org.jetbrains.compose.resources.readResourceBytes
  * @param modifier 修饰符。
  * @param size 表情尺寸（正方形）。
  */
-@OptIn(ExperimentalResourceApi::class)
+@OptIn(InternalResourceApi::class)
 @Composable
 fun AnimatedEmoji(
     resourcePath: String,

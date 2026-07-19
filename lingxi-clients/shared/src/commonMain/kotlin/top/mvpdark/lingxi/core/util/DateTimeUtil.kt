@@ -155,5 +155,5 @@ private fun epochDayToYmd(epochDay: Long): Triple<Int, Int, Int> {
     val d = doy - (153 * mp + 2) / 5 + 1 // [1, 31]
     val m = if (mp < 10) mp + 3 else mp - 9 // [1, 12]
     val year = if (m <= 2) y + 1 else y
-    Triple(year.toInt(), m, d)
+    return Triple(year.toInt(), m, d)
 }

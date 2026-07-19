@@ -530,7 +530,7 @@ private object Crc32 {
         for (n in 0..255) {
             var c = n
             for (k in 0..7) {
-                c = if (c and 1 != 0) 0xEDB88320 xor (c ushr 1) else c ushr 1
+                c = if (c and 1 != 0) (-0x1247CDE0) xor (c ushr 1) else c ushr 1
             }
             table[n] = c
         }
