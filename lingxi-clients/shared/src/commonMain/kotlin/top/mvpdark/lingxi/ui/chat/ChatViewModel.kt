@@ -52,15 +52,19 @@ class ChatViewModel(
         loadSessions()
     }
 
-    /** 加载会话列表。 */
+    /** 加载会话列表。置顶在前，其次按 updated_at 降序。 */
     fun loadSessions() {
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, error = null) }
             val result: Result<List<ChatSession>> = runCatching { chatRepository.getSessions() }
             result
                 .onSuccess { list ->
+                    val sorted = list.sortedWith(
+                        compareByDescending<ChatSession> { it.pinned }
+                            .thenByDescending { it.updatedAt }
+                    )
                     _uiState.update {
-                        it.copy(sessions = list, isLoading = false)
+                        it.copy(sessions = sorted, isLoading = false)
                     }
                 }
                 .onFailure { e ->
@@ -68,6 +72,35 @@ class ChatViewModel(
                         it.copy(isLoading = false, error = "加载会话失败: ${e.message}")
                     }
                 }
+        }
+    }
+
+    /** 切换会话置顶状态。 */
+    fun togglePin(sessionId: String) {
+        val session = _uiState.value.sessions.firstOrNull { it.id == sessionId } ?: return
+        viewModelScope.launch {
+            val result: Result<Unit> = runCatching {
+                if (session.pinned) {
+                    chatRepository.unpinSession(sessionId)
+                } else {
+                    chatRepository.pinSession(sessionId)
+                }
+            }
+            result.onSuccess {
+                // 本地更新 pinned 状态并重新排序
+                _uiState.update { state ->
+                    val updated = state.sessions.map {
+                        if (it.id == sessionId) it.copy(pinned = !session.pinned) else it
+                    }
+                    val sorted = updated.sortedWith(
+                        compareByDescending<ChatSession> { it.pinned }
+                            .thenByDescending { it.updatedAt }
+                    )
+                    state.copy(sessions = sorted)
+                }
+            }.onFailure { e ->
+                _uiState.update { it.copy(error = "操作失败: ${e.message}") }
+            }
         }
     }
 

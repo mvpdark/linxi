@@ -56,6 +56,16 @@ class ChatRepository(
         apiClient.httpClient.delete("/api/sessions/$sessionId")
     }
 
+    /** 置顶会话。后端用 POST /api/sessions/{id}/pin。 */
+    suspend fun pinSession(sessionId: String) {
+        apiClient.httpClient.post("/api/sessions/$sessionId/pin")
+    }
+
+    /** 取消置顶会话。后端用 POST /api/sessions/{id}/unpin。 */
+    suspend fun unpinSession(sessionId: String) {
+        apiClient.httpClient.post("/api/sessions/$sessionId/unpin")
+    }
+
     /** 加载历史消息。后端返回 {history: [...]}。 */
     suspend fun getHistory(sessionId: String): List<ChatMessage> {
         val response: HistoryResponse =

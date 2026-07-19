@@ -3,12 +3,14 @@ package top.mvpdark.lingxi.ui.screens
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.absoluteOffset
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -28,8 +30,11 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.PushPin
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -41,20 +46,26 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import kotlin.math.roundToInt
 import org.koin.compose.viewmodel.koinViewModel
 import top.mvpdark.lingxi.core.util.formatMessageTime
 import top.mvpdark.lingxi.core.util.formatSessionTime
@@ -140,6 +151,8 @@ fun ChatScreen(
                         onCreateNew = {
                             chatViewModel.createNewSession { id -> }
                         },
+                        onTogglePin = chatViewModel::togglePin,
+                        onDelete = chatViewModel::deleteSession,
                         modifier = Modifier
                             .fillMaxHeight()
                             .widthIn(max = 260.dp)
@@ -225,6 +238,11 @@ fun ChatScreen(
 
 /**
  * 会话侧边栏。
+ *
+ * 特性：
+ * - 会话项支持双向滑动：左滑固定/取消固定，右滑删除
+ * - 置顶会话显示图钉图标，排在列表顶部
+ * - 长按会话项弹出删除确认对话框
  */
 @Composable
 private fun SessionSidebar(
@@ -232,8 +250,13 @@ private fun SessionSidebar(
     currentSessionId: String,
     onSelect: (String) -> Unit,
     onCreateNew: () -> Unit,
+    onTogglePin: (String) -> Unit,
+    onDelete: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    // 删除确认对话框状态
+    var deleteTarget by remember { mutableStateOf<top.mvpdark.lingxi.data.model.ChatSession?>(null) }
+
     Card(
         modifier = modifier,
         shape = RoundedCornerShape(0.dp),
@@ -266,45 +289,207 @@ private fun SessionSidebar(
                 verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
                 items(sessions, key = { it.id }) { session ->
-                    val selected = session.id == currentSessionId
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { onSelect(session.id) }
-                            .background(
-                                if (selected) {
-                                    MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
-                                } else {
-                                    androidx.compose.ui.graphics.Color.Transparent
-                                }
-                            )
-                            .padding(horizontal = 16.dp, vertical = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.Chat,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(18.dp),
-                        )
-                        Spacer(Modifier.width(12.dp))
-                        Column {
-                            Text(
-                                text = session.title,
-                                style = MaterialTheme.typography.bodyMedium,
-                                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-                                maxLines = 1,
-                            )
-                            if (session.updatedAt.isNotBlank()) {
-                                Text(
-                                    text = formatSessionTime(session.updatedAt),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    maxLines = 1,
-                                )
-                            }
-                        }
+                    SwipeableSessionItem(
+                        session = session,
+                        isSelected = session.id == currentSessionId,
+                        onClick = { onSelect(session.id) },
+                        onTogglePin = { onTogglePin(session.id) },
+                        onDelete = { deleteTarget = session },
+                    )
+                }
+            }
+        }
+    }
+
+    // 删除确认对话框
+    deleteTarget?.let { session ->
+        AlertDialog(
+            onDismissRequest = { deleteTarget = null },
+            title = { Text("删除会话") },
+            text = { Text("确定要删除「${session.title}」吗？此操作不可撤销。") },
+            confirmButton = {
+                TextButton(onClick = {
+                    onDelete(session.id)
+                    deleteTarget = null
+                }) {
+                    Text("删除", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { deleteTarget = null }) {
+                    Text("取消")
+                }
+            },
+        )
+    }
+}
+
+/**
+ * 可滑动的会话项。
+ *
+ * 交互：
+ * - 左滑（向左拖动）：露出右侧"固定/取消固定"按钮
+ * - 右滑（向右拖动）：露出左侧"删除"按钮
+ * - 点击会话项主体：切换会话
+ * - 释放时根据偏移量决定操作或回弹
+ */
+@Composable
+private fun SwipeableSessionItem(
+    session: top.mvpdark.lingxi.data.model.ChatSession,
+    isSelected: Boolean,
+    onClick: () -> Unit,
+    onTogglePin: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    val maxSwipe = 80.dp
+    val maxSwipePx = with(androidx.compose.ui.platform.LocalDensity.current) { maxSwipe.toPx() }
+    val threshold = maxSwipePx * 0.5f
+
+    var offsetX by remember(session.id) { mutableStateOf(0f) }
+    var dragging by remember { mutableStateOf(false) }
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 8.dp)
+            .height(56.dp),
+    ) {
+        // 背景操作按钮层
+        Row(
+            modifier = Modifier.fillMaxSize(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            // 左侧：删除按钮（右滑时露出）
+            if (offsetX > 0) {
+                Box(
+                    modifier = Modifier
+                        .size(48.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(MaterialTheme.colorScheme.error)
+                        .clickable { onDelete() },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Delete,
+                        contentDescription = "删除",
+                        tint = Color.White,
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
+            } else {
+                Spacer(Modifier.size(48.dp))
+            }
+
+            // 右侧：固定/取消固定按钮（左滑时露出）
+            if (offsetX < 0) {
+                Box(
+                    modifier = Modifier
+                        .size(48.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(MaterialTheme.colorScheme.primary)
+                        .clickable { onTogglePin() },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.PushPin,
+                        contentDescription = if (session.pinned) "取消固定" else "固定",
+                        tint = Color.White,
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
+            } else {
+                Spacer(Modifier.size(48.dp))
+            }
+        }
+
+        // 前景：会话项主体
+        Row(
+            modifier = Modifier
+                .fillMaxSize()
+                .absoluteOffset { IntOffset(offsetX.roundToInt(), 0) }
+                .background(
+                    if (isSelected) {
+                        MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+                    } else {
+                        Color.Transparent
                     }
+                )
+                .clickable {
+                    // 如果处于滑动状态，先复位
+                    if (offsetX != 0f) {
+                        offsetX = 0f
+                    } else {
+                        onClick()
+                    }
+                }
+                .pointerInput(session.id) {
+                    detectHorizontalDragGestures(
+                        onDragStart = { dragging = true },
+                        onDragEnd = {
+                            dragging = false
+                            // 释放时根据偏移量决定操作
+                            when {
+                                offsetX <= -threshold -> {
+                                    // 左滑超过阈值：触发固定
+                                    onTogglePin()
+                                    offsetX = 0f
+                                }
+                                offsetX >= threshold -> {
+                                    // 右滑超过阈值：触发删除
+                                    onDelete()
+                                    offsetX = 0f
+                                }
+                                else -> {
+                                    // 未超过阈值：回弹
+                                    offsetX = 0f
+                                }
+                            }
+                        },
+                        onDragCancel = {
+                            dragging = false
+                            offsetX = 0f
+                        },
+                    ) { _, dragAmount ->
+                        // 累加偏移量，限制在 [-maxSwipePx, maxSwipePx]
+                        offsetX = (offsetX + dragAmount).coerceIn(-maxSwipePx, maxSwipePx)
+                    }
+                }
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            // 置顶图标（已固定时显示）
+            if (session.pinned) {
+                Icon(
+                    imageVector = Icons.Default.PushPin,
+                    contentDescription = "已固定",
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(16.dp),
+                )
+                Spacer(Modifier.width(8.dp))
+            }
+
+            Icon(
+                imageVector = Icons.AutoMirrored.Filled.Chat,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(18.dp),
+            )
+            Spacer(Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = session.title,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
+                    maxLines = 1,
+                )
+                if (session.updatedAt.isNotBlank()) {
+                    Text(
+                        text = formatSessionTime(session.updatedAt),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                    )
                 }
             }
         }
