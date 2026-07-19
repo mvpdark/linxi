@@ -77,6 +77,9 @@ kotlin {
             implementation(libs.androidx.activity.compose)
             // FileProvider（APK 自动更新安装）需要 core-ktx
             implementation(libs.androidx.core.ktx)
+            // EXIF 旋转规范化：与 Coil AsyncImage 显示的图片保持坐标系一致，
+            // 避免 SAM2 解码（BitmapFactory）未应用 EXIF 旋转导致坐标误差
+            implementation("androidx.exifinterface:exifinterface:1.4.1")
         }
 
         val desktopMain by getting {

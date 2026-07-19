@@ -56,6 +56,13 @@ class ChatRepository(
         apiClient.httpClient.delete("/api/sessions/$sessionId")
     }
 
+    /** 重命名会话。后端用 POST /api/sessions/{id}/rename?title=...。 */
+    suspend fun renameSession(sessionId: String, title: String) {
+        apiClient.httpClient.post("/api/sessions/$sessionId/rename") {
+            parameter("title", title)
+        }
+    }
+
     /** 置顶会话。后端用 POST /api/sessions/{id}/pin。 */
     suspend fun pinSession(sessionId: String) {
         apiClient.httpClient.post("/api/sessions/$sessionId/pin")

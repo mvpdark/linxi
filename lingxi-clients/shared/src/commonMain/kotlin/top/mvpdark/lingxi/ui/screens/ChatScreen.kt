@@ -219,7 +219,17 @@ fun ChatScreen(
                         }
 
                         // 历史与用户消息
-                        items(state.messages, key = { it.id }) { message ->
+                        // 兜底 key：后端历史消息若未返回 id（空串），用
+                        // timestamp + content 前缀生成唯一 key，避免
+                        // LazyColumn 重复 key 崩溃。
+                        items(
+                            state.messages,
+                            key = { msg ->
+                                msg.id.ifBlank {
+                                    "msg_${msg.timestamp}_${msg.content.take(10)}"
+                                }
+                            },
+                        ) { message ->
                             ChatBubble(
                                 text = message.content,
                                 isUser = message.role == "user",
@@ -293,23 +303,22 @@ fun ChatScreen(
                     )
                 }
             }
-
-            // 全屏图片预览覆盖层（覆盖整个聊天页，无黑边）
-            if (showImagePreview && pickedImageBytes != null) {
-                FullScreenImagePreview(
-                    model = pickedImageBytes,
-                    onDismiss = { showImagePreview = false },
-                )
-            }
-
-            // 消息图片全屏预览覆盖层（点击聊天气泡图片触发）
-            previewImageUrl?.let { url ->
-                FullScreenImagePreview(
-                    model = UrlResolver.resolveImageUrl(url),
-                    onDismiss = { previewImageUrl = null },
-                )
-            }
         }
+    }
+
+    // 全屏图片预览覆盖层 — 放在 Scaffold 外层，真正全屏无 padding 约束
+    // 横屏时自动隐藏系统栏（沉浸式），竖屏保持系统栏可见
+    if (showImagePreview && pickedImageBytes != null) {
+        FullScreenImagePreview(
+            model = pickedImageBytes,
+            onDismiss = { showImagePreview = false },
+        )
+    }
+    previewImageUrl?.let { url ->
+        FullScreenImagePreview(
+            model = UrlResolver.resolveImageUrl(url),
+            onDismiss = { previewImageUrl = null },
+        )
     }
 }
 

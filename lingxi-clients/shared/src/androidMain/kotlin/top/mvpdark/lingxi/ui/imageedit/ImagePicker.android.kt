@@ -1,6 +1,9 @@
 package top.mvpdark.lingxi.ui.imageedit
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.Matrix
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -8,6 +11,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.platform.LocalContext
+import androidx.exifinterface.media.ExifInterface
+import java.io.ByteArrayOutputStream
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -36,7 +41,56 @@ actual fun rememberImagePickerLauncher(onResult: (ByteArray?) -> Unit): () -> Un
 
 private fun readBytesFromUri(context: Context, uri: Uri): ByteArray? {
     return runCatching {
-        context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+        // 读取原始字节流
+        val rawBytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+            ?: return@runCatching null
+
+        // 读取 EXIF orientation（与 Coil AsyncImage 的显示保持一致）。
+        // 注意：ExifInterface 需要独立的输入流，不能用已读完的 rawBytes。
+        val orientation = runCatching {
+            context.contentResolver.openInputStream(uri)?.use { input ->
+                ExifInterface(input).getAttributeInt(
+                    ExifInterface.TAG_ORIENTATION,
+                    ExifInterface.ORIENTATION_NORMAL,
+                )
+            } ?: ExifInterface.ORIENTATION_NORMAL
+        }.getOrDefault(ExifInterface.ORIENTATION_NORMAL)
+
+        // 无需旋转：直接返回原始字节，保留原图编码格式与质量
+        if (orientation == ExifInterface.ORIENTATION_NORMAL) {
+            return@runCatching rawBytes
+        }
+
+        // 解码并按 EXIF orientation 旋转
+        val bitmap = BitmapFactory.decodeByteArray(rawBytes, 0, rawBytes.size)
+            ?: return@runCatching rawBytes
+        val matrix = Matrix()
+        when (orientation) {
+            ExifInterface.ORIENTATION_ROTATE_90 -> matrix.postRotate(90f)
+            ExifInterface.ORIENTATION_ROTATE_180 -> matrix.postRotate(180f)
+            ExifInterface.ORIENTATION_ROTATE_270 -> matrix.postRotate(270f)
+            ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> matrix.postScale(-1f, 1f)
+            ExifInterface.ORIENTATION_FLIP_VERTICAL -> matrix.postScale(1f, -1f)
+            ExifInterface.ORIENTATION_TRANSPOSE -> {
+                matrix.postRotate(90f)
+                matrix.postScale(-1f, 1f)
+            }
+            ExifInterface.ORIENTATION_TRANSVERSE -> {
+                matrix.postRotate(270f)
+                matrix.postScale(-1f, 1f)
+            }
+        }
+        val rotated = Bitmap.createBitmap(
+            bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true,
+        )
+        if (rotated != bitmap) {
+            bitmap.recycle()
+        }
+        // 重新编码为 JPEG（剥离 EXIF，保证 SamService 解码与 Coil 显示坐标系一致）
+        val out = ByteArrayOutputStream()
+        rotated.compress(Bitmap.CompressFormat.JPEG, 95, out)
+        rotated.recycle()
+        out.toByteArray()
     }.onFailure { e ->
         top.mvpdark.lingxi.core.util.PlatformLogger.e(
             "ImagePicker",

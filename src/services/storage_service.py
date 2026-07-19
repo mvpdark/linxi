@@ -400,9 +400,13 @@ class StorageService:
 
         images 为数组格式；image_url 为旧格式单图字段（取第一张图），
         保留以兼容现有前端渲染与 LLM 上下文构造。
+
+        id 字段必填：客户端 LazyColumn 以 message.id 作为 key，
+        缺失会导致所有消息 key 相同（空串）从而引发重复 key 崩溃。
         """
         images = m.images if isinstance(m.images, list) else []
         return {
+            "id": str(m.id),
             "role": m.role,
             "content": m.content,
             "images": images,

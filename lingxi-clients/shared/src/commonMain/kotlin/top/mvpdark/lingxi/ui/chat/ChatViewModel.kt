@@ -274,6 +274,20 @@ class ChatViewModel(
                     it.copy(isSending = false, agentStatus = null)
                 }
             }
+
+            // 自动命名：如果会话标题还是默认的"新对话"，用首条消息内容生成标题
+            val currentSession = _uiState.value.sessions.find { it.id == currentSessionId }
+            if (currentSession != null && (currentSession.title.isBlank() || currentSession.title == "新对话")) {
+                val autoTitle = pendingText.trim().take(20).ifBlank { "新对话" }
+                runCatching { chatRepository.renameSession(currentSessionId, autoTitle) }
+                _uiState.update { state ->
+                    state.copy(
+                        sessions = state.sessions.map { s ->
+                            if (s.id == currentSessionId) s.copy(title = autoTitle) else s
+                        },
+                    )
+                }
+            }
         }
     }
 
