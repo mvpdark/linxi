@@ -168,10 +168,29 @@ jobs:
           "
 
       - name: Build Desktop MSI
+        id: build-msi
         run: ./gradlew :desktopApp:packageReleaseMsi
         shell: bash
+        continue-on-error: true
+
+      - name: Print jpackage logs on MSI failure
+        if: steps.build-msi.outcome == 'failure'
+        shell: bash
+        run: |
+          echo "=== jpackage error log ==="
+          cat desktopApp/build/compose/logs/packageReleaseMsi/*-err.txt 2>/dev/null || echo "No err.txt found"
+          echo ""
+          echo "=== jpackage output log ==="
+          cat desktopApp/build/compose/logs/packageReleaseMsi/*-out.txt 2>/dev/null || echo "No out.txt found"
+          echo ""
+          echo "=== jpackage args ==="
+          cat desktopApp/build/compose/tmp/packageReleaseMsi.args.txt 2>/dev/null || echo "No args.txt found"
+          echo ""
+          # 强制失败
+          exit 1
 
       - name: Upload MSI
+        if: steps.build-msi.outcome == 'success'
         uses: actions/upload-artifact@v4
         with:
           name: lingxi-desktop-msi
@@ -180,10 +199,25 @@ jobs:
           retention-days: 30
 
       - name: Build Desktop Exe (portable)
+        id: build-exe
         run: ./gradlew :desktopApp:packageReleaseExe
         shell: bash
+        continue-on-error: true
+
+      - name: Print jpackage logs on EXE failure
+        if: steps.build-exe.outcome == 'failure'
+        shell: bash
+        run: |
+          echo "=== jpackage error log ==="
+          cat desktopApp/build/compose/logs/packageReleaseExe/*-err.txt 2>/dev/null || echo "No err.txt found"
+          echo ""
+          echo "=== jpackage output log ==="
+          cat desktopApp/build/compose/logs/packageReleaseExe/*-out.txt 2>/dev/null || echo "No out.txt found"
+          echo ""
+          exit 1
 
       - name: Upload Exe
+        if: steps.build-exe.outcome == 'success'
         uses: actions/upload-artifact@v4
         with:
           name: lingxi-desktop-exe
