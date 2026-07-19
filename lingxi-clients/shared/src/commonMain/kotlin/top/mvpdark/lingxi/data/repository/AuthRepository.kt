@@ -38,6 +38,8 @@ class AuthRepository(
         // TODO: 在 TokenStore 添加 setTokens 原子方法，保证两 token 同时落盘
         tokenStore.setAccessToken(body.accessToken)
         tokenStore.setRefreshToken(body.refreshToken)
+        // 登录成功，重置 refresh 失败状态（允许后续 401 时再次自动刷新）
+        apiClient.resetRefreshState()
         return body
     }
 

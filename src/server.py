@@ -405,7 +405,7 @@ async def bearer_auth_middleware(request, call_next):
 
     auth_header = request.headers.get("Authorization", "")
     if not auth_header.startswith("Bearer "):
-        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+        return JSONResponse({"error": "登录已过期，请重新登录"}, status_code=401)
 
     token = auth_header[len("Bearer "):]
 
@@ -424,7 +424,7 @@ async def bearer_auth_middleware(request, call_next):
         request.state.role = "service"
         return await call_next(request)
 
-    return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    return JSONResponse({"error": "登录已过期，请重新登录"}, status_code=401)
 
 
 # 禁用缓存的中间件（开发环境）—— no-cache 响应头单点负责，
