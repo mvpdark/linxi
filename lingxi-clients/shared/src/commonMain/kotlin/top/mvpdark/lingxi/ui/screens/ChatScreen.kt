@@ -71,6 +71,7 @@ import androidx.compose.ui.unit.dp
 import kotlin.math.roundToInt
 import org.koin.compose.viewmodel.koinViewModel
 import top.mvpdark.lingxi.core.util.EncodeUtils
+import top.mvpdark.lingxi.core.util.UrlResolver
 import top.mvpdark.lingxi.core.util.formatMessageTime
 import top.mvpdark.lingxi.core.util.formatSessionTime
 import top.mvpdark.lingxi.data.model.ChatMessage
@@ -115,6 +116,8 @@ fun ChatScreen(
     // 待发送图片（本地字节流）+ 全屏预览开关
     var pickedImageBytes by remember { mutableStateOf<ByteArray?>(null) }
     var showImagePreview by remember { mutableStateOf(false) }
+    // 消息图片全屏预览 URL（点击聊天气泡中的图片时设置）
+    var previewImageUrl by remember { mutableStateOf<String?>(null) }
 
     // 跨平台图片选择器：选好图片后回调字节流
     val launchImagePicker = rememberImagePickerLauncher { bytes ->
@@ -222,6 +225,7 @@ fun ChatScreen(
                                 isUser = message.role == "user",
                                 images = message.images,
                                 timestamp = formatMessageTime(message.timestamp),
+                                onImageClick = { url -> previewImageUrl = url },
                             )
                         }
 
@@ -244,6 +248,7 @@ fun ChatScreen(
                                         text = state.streamingText,
                                         isUser = false,
                                         images = state.pendingImages,
+                                        onImageClick = { url -> previewImageUrl = url },
                                     )
                                     if (state.isSending) {
                                         TypingIndicator()
@@ -294,6 +299,14 @@ fun ChatScreen(
                 FullScreenImagePreview(
                     model = pickedImageBytes,
                     onDismiss = { showImagePreview = false },
+                )
+            }
+
+            // 消息图片全屏预览覆盖层（点击聊天气泡图片触发）
+            previewImageUrl?.let { url ->
+                FullScreenImagePreview(
+                    model = UrlResolver.resolveImageUrl(url),
+                    onDismiss = { previewImageUrl = null },
                 )
             }
         }

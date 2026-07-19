@@ -49,6 +49,11 @@ compose.desktop {
             copyright = "Copyright 2026 mvpdark. All rights reserved."
             vendor = "mvpdark"
 
+            // 显式包含 java.net.http 模块 — ktor-client-java 引擎依赖 JDK 的 java.net.http.HttpClient
+            // jlink 默认依赖分析无法检测到运行时通过 ServiceLoader 加载的模块
+            // 缺失会导致 Win64 安装包启动失败：java/net/http/HttpClient$Version
+            modules("java.net.http")
+
             windows {
                 menuGroup = "Lingxi"
                 // upgradeUuid 是 MSI 安装包的必需字段 — 用于版本升级标识

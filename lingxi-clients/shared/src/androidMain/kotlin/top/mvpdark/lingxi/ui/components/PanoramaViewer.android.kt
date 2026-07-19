@@ -128,6 +128,11 @@ actual fun PanoramaViewer(
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
             settings.allowFileAccess = true
+            // 修复白屏 bug：允许 file:// URL 的跨域访问
+            // Pannellum 的 WebGL 通过 texImage2D 加载 file:// 临时图片时，
+            // 若 WebView origin 为 null（about:blank）会被跨域安全策略阻止
+            settings.allowFileAccessFromFileURLs = true
+            settings.allowUniversalAccessFromFileURLs = true
             settings.allowContentAccess = true
             settings.mediaPlaybackRequiresUserGesture = false
             webChromeClient = WebChromeClient()
@@ -146,7 +151,10 @@ actual fun PanoramaViewer(
         htmlContent?.let { html ->
             webView.post {
                 webView.loadDataWithBaseURL(
-                    "about:blank",
+                    // 修复白屏 bug：用 file:// baseURL 使页面与临时图片同源
+                    // about:blank 会让 WebView origin 为 null，WebGL 加载 file:// 图片时
+                    // 触发跨域安全策略，texImage2D 抛 SecurityError 导致白屏
+                    "file://${context.cacheDir.absolutePath}/",
                     html,
                     "text/html",
                     "UTF-8",

@@ -115,26 +115,60 @@ class ApngParser {
 
         // 解析帧
         val frames = mutableListOf<ApngFrame>()
+        // 在第一个 fcTL 之前的 IDAT（静态 fallback / 默认图像）
         val defaultIdatChunks = mutableListOf<Chunk>()
+        // 当 fcTL 出现在 IDAT 之前时（APNG 第一帧标准格式），
+        // IDAT 是当前帧的图像数据，需要累积起来
+        val currentFrameIdatChunks = mutableListOf<Chunk>()
 
         var i = 0
         var currentFctl: Chunk? = null
-        var seqNum = 0
 
         while (i < chunks.size) {
             val chunk = chunks[i]
             when (chunk.type) {
                 "fcTL" -> {
+                    // 遇到新的 fcTL：如果之前有 fcTL 且累积了 IDAT
+                    // （fcTL 在 IDAT 之前的情况），先构建那一帧
+                    if (currentFctl != null && currentFrameIdatChunks.isNotEmpty()) {
+                        val frame = buildFrameFromIdat(
+                            fctl = currentFctl,
+                            idatChunks = currentFrameIdatChunks.toList(),
+                            width = width,
+                            height = height,
+                            ihdrRaw = ihdrRaw,
+                            ancillaryChunks = ancillaryChunks,
+                        )
+                        frames.add(frame)
+                        currentFrameIdatChunks.clear()
+                    }
                     currentFctl = chunk
                 }
                 "IDAT" -> {
-                    // 默认帧的图像数据（在第一个 fcTL 之前的 IDAT）
                     if (currentFctl == null) {
+                        // 默认帧的图像数据（在第一个 fcTL 之前的 IDAT，静态 fallback）
                         defaultIdatChunks.add(chunk)
+                    } else {
+                        // fcTL 在 IDAT 之前：IDAT 是当前帧的图像数据（APNG 第一帧标准格式）
+                        // 之前会被错误丢弃，现在累积起来在后续构建帧
+                        currentFrameIdatChunks.add(chunk)
                     }
                 }
                 "fdAT" -> {
                     if (currentFctl != null) {
+                        // 如果之前累积了 IDAT（fcTL 在 IDAT 之前的情况），先处理那一帧
+                        if (currentFrameIdatChunks.isNotEmpty()) {
+                            val idatFrame = buildFrameFromIdat(
+                                fctl = currentFctl,
+                                idatChunks = currentFrameIdatChunks.toList(),
+                                width = width,
+                                height = height,
+                                ihdrRaw = ihdrRaw,
+                                ancillaryChunks = ancillaryChunks,
+                            )
+                            frames.add(idatFrame)
+                            currentFrameIdatChunks.clear()
+                        }
                         val frame = buildFrame(
                             fctl = currentFctl,
                             fdat = chunk,
@@ -151,28 +185,27 @@ class ApngParser {
             i++
         }
 
-        // 处理默认帧（如果有 IDAT 但没有对应的 fcTL，需要创建默认帧）
-        // APNG 规范：如果第一个 fcTL 出现在 IDAT 之前，则默认帧也是动画的第一帧
-        // 如果第一个 fcTL 出现在 IDAT 之后，则默认帧是静态的 fallback
-        if (defaultIdatChunks.isNotEmpty() && frames.isNotEmpty()) {
-            // 检查第一个帧的 fcTL 是否在 IDAT 之前
-            val firstFctlIndex = chunks.indexOfFirst { it.type == "fcTL" }
-            val firstIdatIndex = chunks.indexOfFirst { it.type == "IDAT" }
-            if (firstFctlIndex < firstIdatIndex) {
-                // 默认帧就是第一帧，已经被 fdAT 处理了
-            } else {
-                // 默认帧是独立的 fallback，作为第一帧
-                val defaultFrame = buildDefaultFrame(
-                    idatChunks = defaultIdatChunks,
-                    width = width,
-                    height = height,
-                    ihdrRaw = ihdrRaw,
-                    ancillaryChunks = ancillaryChunks,
-                )
-                frames.add(0, defaultFrame)
-            }
-        } else if (defaultIdatChunks.isNotEmpty() && frames.isEmpty()) {
-            // 只有默认帧，没有动画
+        // 循环结束后，处理可能残留的最后一帧
+        // （fcTL 在 IDAT 之前，且 IDAT 是最后一帧，没有后续 fcTL/fdAT 触发构建）
+        if (currentFctl != null && currentFrameIdatChunks.isNotEmpty()) {
+            val frame = buildFrameFromIdat(
+                fctl = currentFctl,
+                idatChunks = currentFrameIdatChunks.toList(),
+                width = width,
+                height = height,
+                ihdrRaw = ihdrRaw,
+                ancillaryChunks = ancillaryChunks,
+            )
+            frames.add(frame)
+            currentFrameIdatChunks.clear()
+        }
+
+        // 处理默认帧（IDAT 在第一个 fcTL 之前，是静态 fallback）
+        // APNG 规范：如果第一个 fcTL 出现在 IDAT 之后，则 IDAT 是静态 fallback，
+        // 作为默认图像（非动画第一帧）
+        // 注意：fcTL 在 IDAT 之前时，IDAT 已被 currentFrameIdatChunks 处理，
+        // 不会进入 defaultIdatChunks，所以这里无需再判断 firstFctlIndex < firstIdatIndex
+        if (defaultIdatChunks.isNotEmpty()) {
             val defaultFrame = buildDefaultFrame(
                 idatChunks = defaultIdatChunks,
                 width = width,
@@ -263,15 +296,25 @@ class ApngParser {
     )
 
     private fun parseFctl(data: ByteArray): FrameControl {
+        // fcTL chunk data 格式（APNG 规范）：
+        // offset 0:  sequence_number (4 bytes) — 帧序号，必须跳过
+        // offset 4:  width (4 bytes)
+        // offset 8:  height (4 bytes)
+        // offset 12: x_offset (4 bytes)
+        // offset 16: y_offset (4 bytes)
+        // offset 20: delay_num (2 bytes)
+        // offset 22: delay_den (2 bytes)
+        // offset 24: dispose_op (1 byte)
+        // offset 25: blend_op (1 byte)
         return FrameControl(
-            width = readInt32(data, 0),
-            height = readInt32(data, 4),
-            xOffset = readInt32(data, 8),
-            yOffset = readInt32(data, 12),
-            delayNum = readInt16(data, 16),
-            delayDen = readInt16(data, 18),
-            disposeOp = data[20].toInt() and 0xFF,
-            blendOp = data[21].toInt() and 0xFF,
+            width = readInt32(data, 4),
+            height = readInt32(data, 8),
+            xOffset = readInt32(data, 12),
+            yOffset = readInt32(data, 16),
+            delayNum = readInt16(data, 20),
+            delayDen = readInt16(data, 22),
+            disposeOp = data[24].toInt() and 0xFF,
+            blendOp = data[25].toInt() and 0xFF,
         )
     }
 
@@ -322,6 +365,60 @@ class ApngParser {
             fdat.data.copyOfRange(4, fdat.data.size)
         } else {
             ByteArray(0)
+        }
+
+        // 如果帧尺寸与原图不同，需要修改 IHDR 中的宽高
+        val frameIhdr = if (fc.width != width || fc.height != height) {
+            modifyIhdr(ihdrRaw, fc.width, fc.height)
+        } else {
+            ihdrRaw
+        }
+
+        // 构建 PNG：签名 + IHDR + 辅助 chunk + IDAT + IEND
+        val pngBytes = buildPng(
+            ihdrRaw = frameIhdr,
+            ancillaryChunks = ancillaryChunks,
+            idatData = idatData,
+        )
+
+        // 计算延迟（毫秒）
+        val delayDen = if (fc.delayDen == 0) 100 else fc.delayDen
+        val delayMs = (fc.delayNum.toLong() * 1000) / delayDen
+
+        return ApngFrame(
+            width = fc.width,
+            height = fc.height,
+            xOffset = fc.xOffset,
+            yOffset = fc.yOffset,
+            delayMs = delayMs,
+            disposeOp = fc.disposeOp,
+            blendOp = fc.blendOp,
+            pngBytes = pngBytes,
+        )
+    }
+
+    /**
+     * 从 IDAT chunks 构建帧（当 fcTL 出现在 IDAT 之前时，第一帧使用 IDAT 数据）。
+     *
+     * 与 [buildFrame] 的区别：IDAT 数据没有 sequence_number 前缀，无需跳过 4 字节。
+     * 支持 PNG 规范允许多个 IDAT chunk 分片的情况。
+     */
+    private fun buildFrameFromIdat(
+        fctl: Chunk,
+        idatChunks: List<Chunk>,
+        width: Int,
+        height: Int,
+        ihdrRaw: ByteArray,
+        ancillaryChunks: List<ByteArray>,
+    ): ApngFrame {
+        val fc = parseFctl(fctl.data)
+
+        // 合并所有 IDAT 数据（IDAT 没有 sequence_number 前缀，与 fdAT 不同）
+        val idatData = ByteArray(idatChunks.sumOf { it.data.size })
+        var offset = 0
+        for (chunk in idatChunks) {
+            System.arraycopy(chunk.data, 0, idatData, offset, chunk.data.size)
+            offset += chunk.data.size
         }
 
         // 如果帧尺寸与原图不同，需要修改 IHDR 中的宽高

@@ -20,6 +20,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import org.jetbrains.compose.resources.InternalResourceApi
 import org.jetbrains.compose.resources.readResourceBytes
+import top.mvpdark.lingxi.core.util.PlatformLogger
 
 /**
  * APNG 动画表情组件。
@@ -50,6 +51,7 @@ fun AnimatedEmoji(
                 val bytes = readResourceBytes(resourcePath)
                 ApngParser().parse(bytes)
             } catch (e: Exception) {
+                PlatformLogger.e("AnimatedEmoji", "APNG 解析失败: $resourcePath", e)
                 null
             }
         }
@@ -67,7 +69,12 @@ fun AnimatedEmoji(
     val framesState = produceState<List<ImageBitmap>?>(initialValue = null, apngData) {
         value = withContext(Dispatchers.Default) {
             apngData.frames.mapNotNull { frame ->
-                decodePngBytes(frame.pngBytes)
+                try {
+                    decodePngBytes(frame.pngBytes)
+                } catch (e: Exception) {
+                    PlatformLogger.e("AnimatedEmoji", "帧解码失败", e)
+                    null
+                }
             }
         }
     }

@@ -2,6 +2,7 @@ package top.mvpdark.lingxi.ui.components
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -61,6 +62,7 @@ fun ChatBubble(
     images: List<String> = emptyList(),
     timestamp: String = "",
     modifier: Modifier = Modifier,
+    onImageClick: (String) -> Unit = {},
 ) {
     val isDark = LocalDarkTheme.current
     val style = LocalThemeStyle.current
@@ -152,6 +154,7 @@ fun ChatBubble(
                             contentScale = ContentScale.FillWidth,
                             modifier = Modifier
                                 .sizeIn(maxWidth = 240.dp, maxHeight = 320.dp)
+                                .clickable { onImageClick(imageUrl) }
                                 .then(
                                     if (isNoirAurum) {
                                         Modifier.border(width = 1.dp, color = Champagne.copy(alpha = 0.3f), shape = imageShape)

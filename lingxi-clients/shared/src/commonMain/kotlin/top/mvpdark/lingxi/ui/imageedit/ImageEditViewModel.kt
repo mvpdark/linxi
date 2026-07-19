@@ -115,7 +115,7 @@ class ImageEditViewModel(
                 val displayUrl = if (uploadResult.success) uploadResult.image else null
                 // VLM 检测失败时不阻塞流程，记录 warning 供 Edit 步骤展示
                 val detectWarning = if (!detectResult.success) {
-                    "物品检测失败，可手动框选或直接改图"
+                    detectResult.error.ifBlank { "物品检测失败，可手动框选或直接改图" }
                 } else {
                     null
                 }
