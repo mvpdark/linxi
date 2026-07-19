@@ -44,8 +44,8 @@ object MaskPostProcessor {
         if (mask.isEmpty() || width <= 0 || height <= 0) return null
 
         // 1. 8-连通域 BFS 标记，找最大连通域
-        // 使用 ShortArray 节省内存（标签数远小于 32767）；连通域数量极少会超过 Short.MAX_VALUE。
-        val labels = ShortArray(width * height)
+        // 使用 IntArray 标记连通域（标签数远小于 Int.MAX_VALUE）。
+        val labels = IntArray(width * height)
         var nextLabel = 1
         var maxLabel = 0
         var maxSize = 0
@@ -57,7 +57,7 @@ object MaskPostProcessor {
                 // BFS 标记新连通域
                 val queue = ArrayDeque<Int>()
                 queue.addLast(idx)
-                labels[idx] = nextLabel.toShort()
+                labels[idx] = nextLabel
                 var size = 1
                 while (queue.isNotEmpty()) {
                     val cur = queue.removeFirst()
@@ -68,7 +68,7 @@ object MaskPostProcessor {
                             if (nx == cx && ny == cy) continue
                             val nIdx = ny * width + nx
                             if (mask[nIdx] > 0 && labels[nIdx] == 0) {
-                                labels[nIdx] = nextLabel.toShort()
+                                labels[nIdx] = nextLabel
                                 queue.addLast(nIdx)
                                 size++
                             }
@@ -147,7 +147,7 @@ object MaskPostProcessor {
      * @return 轮廓点列表 [(x, y), ...]，像素坐标
      */
     private fun mooreNeighborTrace(
-        labels: ShortArray,
+        labels: IntArray,
         targetLabel: Int,
         width: Int,
         height: Int,
