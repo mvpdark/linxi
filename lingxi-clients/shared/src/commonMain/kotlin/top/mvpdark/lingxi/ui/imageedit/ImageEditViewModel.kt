@@ -154,25 +154,26 @@ class ImageEditViewModel(
                         it.copy(step = Step.Segmenting, samLoading = true)
                     }
 
-                    // 优先调用后端 SAM 2（后端模型可靠，无需客户端下载模型文件）
+                    // 优先使用端侧 SAM 2（CI 构建时已打包 ONNX 模型，无需网络请求）
+                    if (!samService.isReady) {
+                        runCatching {
+                            samService.loadModel { progress, _ ->
+                                _uiState.update { it.copy(samProgress = progress) }
+                            }
+                        }.onFailure { e ->
+                            PlatformLogger.e("ImageEditViewModel", "SAM loadModel failed", e)
+                        }
+                    }
+
                     var samResult = runCatching {
-                        repository.samSegment(bytes, "image.jpg", detectedObjects.map { it.id to it.bbox })
+                        samService.segment(bytes, detectedObjects.map { it.id to it.bbox })
                     }.getOrNull()
 
-                    // 后端 SAM 失败 → 尝试端侧 SAM（如果可用）
+                    // 端侧 SAM 失败 → 回退到后端 SAM 2（后端模型可用，但需要网络请求）
                     if (samResult == null || !samResult.success) {
-                        PlatformLogger.w("ImageEditViewModel", "Backend SAM failed, trying on-device SAM")
-                        if (!samService.isReady) {
-                            runCatching {
-                                samService.loadModel { progress, _ ->
-                                    _uiState.update { it.copy(samProgress = progress) }
-                                }
-                            }.onFailure { e ->
-                                PlatformLogger.e("ImageEditViewModel", "SAM loadModel failed", e)
-                            }
-                        }
+                        PlatformLogger.w("ImageEditViewModel", "On-device SAM failed, trying backend SAM")
                         samResult = runCatching {
-                            samService.segment(bytes, detectedObjects.map { it.id to it.bbox })
+                            repository.samSegment(bytes, "image.jpg", detectedObjects.map { it.id to it.bbox })
                         }.getOrNull()
                     }
 
