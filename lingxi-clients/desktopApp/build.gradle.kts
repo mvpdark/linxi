@@ -50,8 +50,9 @@ compose.desktop {
 
             windows {
                 menuGroup = "Lingxi"
-                // 应用图标（Windows .ico）— RegularFileProperty 需用 .file() 而非 .dir()
-                iconFile.set(project.layout.projectDirectory.file("resources/windows/lingxi.ico"))
+                // 暂时不设置自定义图标 — jpackage 对 ICO 格式要求严格，
+                // 当前 ICO 文件导致 "Input length = 1" 错误，先用默认图标让 MSI 打包成功
+                // iconFile.set(project.layout.projectDirectory.file("resources/windows/lingxi.ico"))
                 // 捆绑 JRE，无需用户预装 Java
                 jvmArgs += listOf("-Xmx2g", "-Dfile.encoding=UTF-8")
             }
