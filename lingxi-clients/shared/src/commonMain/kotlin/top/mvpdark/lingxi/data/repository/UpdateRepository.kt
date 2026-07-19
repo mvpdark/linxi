@@ -3,6 +3,7 @@ package top.mvpdark.lingxi.data.repository
 import io.ktor.client.call.body
 import io.ktor.client.request.get
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.SerialName
 import top.mvpdark.lingxi.core.network.ApiClient
 import top.mvpdark.lingxi.core.util.runCatchingCancellable
 
@@ -11,7 +12,7 @@ import top.mvpdark.lingxi.core.util.runCatchingCancellable
  */
 @Serializable
 data class GitHubRelease(
-    val tagName: String = "",
+    @SerialName("tag_name") val tagName: String = "",
     val name: String = "",
     val body: String = "",
     val assets: List<GitHubAsset> = emptyList(),
@@ -20,7 +21,7 @@ data class GitHubRelease(
 @Serializable
 data class GitHubAsset(
     val name: String = "",
-    val browserDownloadUrl: String = "",
+    @SerialName("browser_download_url") val browserDownloadUrl: String = "",
     val size: Long = 0,
 )
 
