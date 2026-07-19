@@ -51,7 +51,7 @@ jobs:
           from huggingface_hub import hf_hub_download
           import os, shutil
           repo = 'onnx-community/EdgeTAM-ONNX'
-          out = 'lingxi-clients/androidApp/src/androidMain/assets/models/edgetam'
+          out = 'androidApp/src/androidMain/assets/models/edgetam'
           os.makedirs(out, exist_ok=True)
           # List all onnx files
           from huggingface_hub import list_repo_files
@@ -144,7 +144,7 @@ jobs:
           from huggingface_hub import hf_hub_download, list_repo_files
           import os, shutil
           repo = 'onnx-community/EdgeTAM-ONNX'
-          out = 'lingxi-clients/desktopApp/resources/models/edgetam'
+          out = 'desktopApp/resources/models/edgetam'
           os.makedirs(out, exist_ok=True)
           files = list_repo_files(repo)
           onnx_files = [f for f in files if f.startswith('onnx/') and f.endswith(('.onnx', '.onnx_data'))]
@@ -186,8 +186,8 @@ jobs:
           echo "=== jpackage args ==="
           cat desktopApp/build/compose/tmp/packageReleaseMsi.args.txt 2>/dev/null || echo "No args.txt found"
           echo ""
-          # 强制失败
-          exit 1
+          # MSI 与 EXE 是两种独立的打包格式，MSI 失败不应阻断 EXE 构建
+          # 仅打印日志，不调用 exit 1，让后续 EXE 构建步骤继续执行
 
       - name: Upload MSI
         if: steps.build-msi.outcome == 'success'
@@ -252,7 +252,7 @@ jobs:
           from huggingface_hub import hf_hub_download, list_repo_files
           import os, shutil
           repo = 'onnx-community/EdgeTAM-ONNX'
-          out = 'lingxi-clients/desktopApp/resources/models/edgetam'
+          out = 'desktopApp/resources/models/edgetam'
           os.makedirs(out, exist_ok=True)
           files = list_repo_files(repo)
           onnx_files = [f for f in files if f.startswith('onnx/') and f.endswith(('.onnx', '.onnx_data'))]

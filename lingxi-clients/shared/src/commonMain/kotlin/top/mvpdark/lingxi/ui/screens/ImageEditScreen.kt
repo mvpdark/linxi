@@ -5,6 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
+import top.mvpdark.lingxi.ui.emoji.AnimatedEmoji
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -139,6 +140,7 @@ fun ImageEditScreen(
 
                 ImageEditViewModel.Step.Analyzing -> LoadingContent(
                     message = "AI 正在分析图片...",
+                    emojiPath = "files/emoji/agents/animated/vision_analyst/working.apng",
                 )
 
                 ImageEditViewModel.Step.Segmenting -> SegmentingContent(
@@ -152,6 +154,7 @@ fun ImageEditScreen(
 
                 ImageEditViewModel.Step.Generating -> LoadingContent(
                     message = "AI 正在生成修改后的图片...",
+                    emojiPath = "files/emoji/agents/animated/image_generator/working.apng",
                 )
 
                 ImageEditViewModel.Step.Result -> ResultContent(
@@ -244,6 +247,7 @@ private fun UploadContent(
 @Composable
 private fun LoadingContent(
     message: String,
+    emojiPath: String = "files/emoji/animated/thinking.apng",
 ) {
     Column(
         modifier = Modifier
@@ -252,10 +256,10 @@ private fun LoadingContent(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
-        CircularProgressIndicator(
-            modifier = Modifier.size(48.dp),
-            strokeWidth = 4.dp,
-            color = MaterialTheme.colorScheme.primary,
+        // APNG 动画表情替代纯进度圈
+        AnimatedEmoji(
+            resourcePath = emojiPath,
+            size = 72.dp,
         )
         Spacer(Modifier.height(20.dp))
         Text(
@@ -284,10 +288,10 @@ private fun SegmentingContent(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
-        CircularProgressIndicator(
-            modifier = Modifier.size(48.dp),
-            strokeWidth = 4.dp,
-            color = MaterialTheme.colorScheme.primary,
+        // APNG 动画表情：视觉分析师工作中
+        AnimatedEmoji(
+            resourcePath = "files/emoji/agents/animated/vision_analyst/working.apng",
+            size = 72.dp,
         )
         Spacer(Modifier.height(20.dp))
         Text(

@@ -49,9 +49,14 @@ import java.util.Base64
  * 由于 Compose Desktop 环境无法直接运行 WebGL（JCEF/JavaFX 依赖过重，
  * 且 jlink 打包复杂），采用「浏览器打开」方案：
  *
- * 1. 将 Pannellum + 全景图（base64）内联到一个自包含 HTML 文件
- * 2. 用系统默认浏览器打开该 HTML 文件（浏览器支持完整 WebGL）
- * 3. Compose UI 中显示静态预览 + "已在浏览器中打开" 提示
+ * 1. 将 pannellum.js、pannellum.css、panorama_data.js（base64 图片）写入临时目录
+ * 2. 生成 index.html 引用上述文件
+ * 3. 用系统默认浏览器打开 index.html（浏览器支持完整 WebGL）
+ * 4. Compose UI 中显示静态预览 + "已在浏览器中打开" 提示
+ *
+ * 注意：pannellum.js 包含 $a 等 JS 变量名，不能内联到 Kotlin """...""" 模板字符串
+ * （Kotlin 会将 $a 解析为模板表达式导致编译错误），必须作为独立文件通过
+ * <script src="pannellum.js"> 引用。
  *
  * @param imageUrl 全景图 URL（data URL 或 http URL）
  * @param modifier 修饰符
@@ -73,7 +78,7 @@ actual fun PanoramaViewer(
         browserOpened = false
         withContext(Dispatchers.IO) {
             try {
-                val file = prepareSelfContainedHtml(imageUrl)
+                val file = preparePanoramaFiles(imageUrl)
                 htmlFile = file
                 openInBrowser(file)
                 browserOpened = true
@@ -175,89 +180,110 @@ actual fun PanoramaViewer(
 }
 
 /**
- * 准备自包含 HTML 文件（pannellum + base64 图片全部内联）。
+ * 准备全景图文件目录（pannellum.js + pannellum.css + panorama_data.js + index.html）。
+ *
+ * 关键：pannellum.js 作为独立文件写入，不内联到 Kotlin 模板字符串，
+ * 避免 $a 等 JS 变量名被 Kotlin 解析为模板表达式。
  */
 @OptIn(InternalResourceApi::class)
-private suspend fun prepareSelfContainedHtml(imageUrl: String): File {
-    // 1. 读取 pannellum.js 和 pannellum.css
-    val jsCode = readResourceBytes("files/panorama/pannellum.js").decodeToString()
-    val cssCode = readResourceBytes("files/panorama/pannellum.css").decodeToString()
+private suspend fun preparePanoramaFiles(imageUrl: String): File {
+    // 1. 创建临时目录
+    val dir = File(System.getProperty("java.io.tmpdir"), "panorama_${System.currentTimeMillis()}")
+    dir.mkdirs()
 
-    // 2. 读取全景图字节并转 base64
+    // 注册 JVM 关闭钩子：在 JVM 退出时递归删除整个临时目录，避免临时文件泄漏。
+    // 说明：File.deleteOnExit() 只能删除单个文件，无法删除非空目录（JVM 退出时
+    // 目录若仍非空则删除失败），因此采用 shutdown hook + deleteRecursively() 方案，
+    // 确保 pannellum.js / pannellum.css / panorama_data.js / index.html 及目录本身
+    // 都能被彻底清理。
+    Runtime.getRuntime().addShutdownHook(Thread {
+        dir.deleteRecursively()
+    })
+
+    // 2. 写入 pannellum.js（独立文件，不内联）
+    val jsBytes = readResourceBytes("files/panorama/pannellum.js")
+    File(dir, "pannellum.js").writeBytes(jsBytes)
+
+    // 3. 写入 pannellum.css
+    val cssBytes = readResourceBytes("files/panorama/pannellum.css")
+    File(dir, "pannellum.css").writeBytes(cssBytes)
+
+    // 4. 读取全景图字节并转 base64，写入 panorama_data.js
     val imageBytes = readImageBytes(imageUrl)
     val base64Str = Base64.getEncoder().encodeToString(imageBytes)
+    val dataJs = "window.__panoramaBase64 = \"data:image/jpeg;base64," + base64Str + "\";"
+    File(dir, "panorama_data.js").writeText(dataJs)
 
-    // 3. 构建自包含 HTML
-    val html = """<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>360° Panorama - 灵犀</title>
-<style>
-$cssCode
-* { margin: 0; padding: 0; box-sizing: border-box; }
-html, body { width: 100%; height: 100%; overflow: hidden; background: #000; }
-#viewer { width: 100vw; height: 100vh; }
-.hint {
-  position: absolute; bottom: 16px; left: 50%; transform: translateX(-50%);
-  color: rgba(255,255,255,0.8); font-size: 14px; font-family: -apple-system, sans-serif;
-  background: rgba(0,0,0,0.4); padding: 6px 14px; border-radius: 16px;
-  pointer-events: none; z-index: 10;
-}
-</style>
-</head>
-<body>
-<div id="viewer"></div>
-<div class="hint" id="hint">拖动画面查看 360° 视角</div>
-<script>
-// pannellum.js 内联
-$jsCode
-</script>
-<script>
-var viewer = null;
-function base64ToBlobUrl(base64) {
-  var pure = base64;
-  if (pure.indexOf(',') !== -1) pure = pure.split(',')[1];
-  var bytes = atob(pure);
-  var arr = new Uint8Array(bytes.length);
-  for (var i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i);
-  return URL.createObjectURL(new Blob([arr], { type: 'image/jpeg' }));
-}
-(function() {
-  var base64 = "data:image/jpeg;base64,$base64Str";
-  var blobUrl = base64ToBlobUrl(base64);
-  viewer = pannellum.viewer('viewer', {
-    type: 'equirectangular',
-    panorama: blobUrl,
-    autoLoad: true,
-    showZoomCtrl: true,
-    showFullscreenCtrl: true,
-    compass: false,
-    minHfov: 50,
-    maxHfov: 120,
-    friction: 0.15
-  });
-  viewer.on('loadError', function() {
-    document.getElementById('hint').textContent = '全景图加载失败';
-  });
-  viewer.on('error', function() {
-    document.getElementById('hint').textContent = '全景图加载失败';
-  });
-  document.getElementById('viewer').addEventListener('mousedown', function() {
-    var h = document.getElementById('hint');
-    if (h) h.style.display = 'none';
-  }, { once: true });
-})();
-</script>
-</body>
-</html>"""
+    // 5. 生成 index.html（通过 <script src> 引用外部文件，不内联 JS）
+    val html = buildString {
+        appendLine("<!DOCTYPE html>")
+        appendLine("<html lang=\"zh-CN\">")
+        appendLine("<head>")
+        appendLine("<meta charset=\"UTF-8\">")
+        appendLine("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">")
+        appendLine("<title>360 Panorama - Lingxi</title>")
+        appendLine("<link rel=\"stylesheet\" href=\"pannellum.css\">")
+        appendLine("<style>")
+        appendLine("* { margin: 0; padding: 0; box-sizing: border-box; }")
+        appendLine("html, body { width: 100%; height: 100%; overflow: hidden; background: #000; }")
+        appendLine("#viewer { width: 100vw; height: 100vh; }")
+        appendLine(".hint {")
+        appendLine("  position: absolute; bottom: 16px; left: 50%; transform: translateX(-50%);")
+        appendLine("  color: rgba(255,255,255,0.8); font-size: 14px; font-family: -apple-system, sans-serif;")
+        appendLine("  background: rgba(0,0,0,0.4); padding: 6px 14px; border-radius: 16px;")
+        appendLine("  pointer-events: none; z-index: 10;")
+        appendLine("}")
+        appendLine("</style>")
+        appendLine("</head>")
+        appendLine("<body>")
+        appendLine("<div id=\"viewer\"></div>")
+        appendLine("<div class=\"hint\" id=\"hint\">拖动画面查看 360 视角</div>")
+        appendLine("<script src=\"panorama_data.js\"></script>")
+        appendLine("<script src=\"pannellum.js\"></script>")
+        appendLine("<script>")
+        appendLine("var viewer = null;")
+        appendLine("function base64ToBlobUrl(base64) {")
+        appendLine("  var pure = base64;")
+        appendLine("  if (pure.indexOf(',') !== -1) pure = pure.split(',')[1];")
+        appendLine("  var bytes = atob(pure);")
+        appendLine("  var arr = new Uint8Array(bytes.length);")
+        appendLine("  for (var i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i);")
+        appendLine("  return URL.createObjectURL(new Blob([arr], { type: 'image/jpeg' }));")
+        appendLine("}")
+        appendLine("(function() {")
+        appendLine("  var blobUrl = base64ToBlobUrl(window.__panoramaBase64);")
+        appendLine("  viewer = pannellum.viewer('viewer', {")
+        appendLine("    type: 'equirectangular',")
+        appendLine("    panorama: blobUrl,")
+        appendLine("    autoLoad: true,")
+        appendLine("    showZoomCtrl: true,")
+        appendLine("    showFullscreenCtrl: true,")
+        appendLine("    compass: false,")
+        appendLine("    minHfov: 50,")
+        appendLine("    maxHfov: 120,")
+        appendLine("    friction: 0.15")
+        appendLine("  });")
+        appendLine("  viewer.on('loadError', function() {")
+        appendLine("    document.getElementById('hint').textContent = '全景图加载失败';")
+        appendLine("  });")
+        appendLine("  viewer.on('error', function() {")
+        appendLine("    document.getElementById('hint').textContent = '全景图加载失败';")
+        appendLine("  });")
+        appendLine("  document.getElementById('viewer').addEventListener('mousedown', function() {")
+        appendLine("    var h = document.getElementById('hint');")
+        appendLine("    if (h) h.style.display = 'none';")
+        appendLine("  }, { once: true });")
+        appendLine("})();")
+        appendLine("</script>")
+        appendLine("</body>")
+        appendLine("</html>")
+    }
 
-    // 4. 写入临时文件
-    val tempFile = File.createTempFile("panorama_", ".html")
-    tempFile.writeText(html)
-    tempFile.deleteOnExit()
-    return tempFile
+    val htmlFile = File(dir, "index.html")
+    htmlFile.writeText(html)
+    // 临时文件清理由上方注册的 JVM 关闭钩子统一处理（递归删除整个临时目录），
+    // 无需再对单个文件调用 deleteOnExit()。
+    return htmlFile
 }
 
 /**
@@ -276,7 +302,11 @@ private suspend fun readImageBytes(imageUrl: String): ByteArray {
             }
             imageUrl.startsWith("http://") || imageUrl.startsWith("https://") -> {
                 val url = URI(imageUrl).toURL()
-                url.openStream().use { it.readBytes() }
+                val conn = url.openConnection() as java.net.HttpURLConnection
+                conn.connectTimeout = 15000
+                conn.readTimeout = 30000
+                conn.useCaches = false
+                conn.inputStream.use { it.readBytes() }
             }
             else -> {
                 try {
@@ -296,6 +326,6 @@ private fun openInBrowser(file: File) {
     if (Desktop.isDesktopSupported() && Desktop.getDesktop().isSupported(Desktop.Action.BROWSE)) {
         Desktop.getDesktop().browse(file.toURI())
     } else {
-        throw UnsupportedOperationException("当前系统不支持自动打开浏览器，请手动打开: ${file.absolutePath}")
+        throw UnsupportedOperationException("当前系统不支持自动打开浏览器，请手动打开: " + file.absolutePath)
     }
 }

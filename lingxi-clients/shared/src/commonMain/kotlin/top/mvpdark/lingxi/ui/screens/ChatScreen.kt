@@ -246,6 +246,7 @@ fun ChatScreen(
                                     status = state.agentStatus!!,
                                     events = state.agentEvents,
                                     emojiState = state.emojiState,
+                                    agentEmojiPath = state.agentEmojiPath,
                                 )
                             }
                         }
@@ -590,6 +591,7 @@ private fun AgentStatusCard(
     status: String,
     events: List<top.mvpdark.lingxi.data.model.AgentEvent>,
     emojiState: EmojiState = EmojiState.THINKING,
+    agentEmojiPath: String? = null,
 ) {
     val isNoirAurum = LocalThemeStyle.current == LingxiThemeStyle.NOIR_AURUM
     val cardShape = RoundedCornerShape(16.dp)
@@ -612,9 +614,9 @@ private fun AgentStatusCard(
             modifier = Modifier.padding(12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            // 团团 APNG 动画表情
+            // 表情动画：有 Agent 专属表情时显示 Agent 表情，否则显示团团主表情
             AnimatedEmoji(
-                resourcePath = emojiState.resourcePath,
+                resourcePath = agentEmojiPath ?: emojiState.resourcePath,
                 size = 40.dp,
             )
             Spacer(Modifier.width(12.dp))

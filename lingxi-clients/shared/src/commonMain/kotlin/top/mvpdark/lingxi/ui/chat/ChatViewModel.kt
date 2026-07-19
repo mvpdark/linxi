@@ -14,6 +14,9 @@ import top.mvpdark.lingxi.core.util.currentTimeMillis
 import top.mvpdark.lingxi.data.repository.ChatRepository
 import top.mvpdark.lingxi.ui.emoji.EmojiState
 import top.mvpdark.lingxi.ui.emoji.chooseDoneEmoji
+import top.mvpdark.lingxi.ui.emoji.AgentType
+import top.mvpdark.lingxi.ui.emoji.AgentEmojiState
+import top.mvpdark.lingxi.ui.emoji.getAgentEmojiPath
 import kotlinx.coroutines.delay
 
 /**
@@ -33,6 +36,8 @@ data class ChatUiState(
     val error: String? = null,
     /** 团团表情状态（APNG 动画）。 */
     val emojiState: EmojiState = EmojiState.IDLE,
+    /** 当前活跃 Agent 的专属表情路径（null 时显示团团主表情）。 */
+    val agentEmojiPath: String? = null,
     /** 流式期间收集的图片 URL（搜索图 + AI 制图），done 时挂到 AI 消息。 */
     val pendingImages: List<String> = emptyList(),
 )
@@ -211,6 +216,7 @@ class ChatViewModel(
                 agentEvents = emptyList(),
                 error = null,
                 emojiState = EmojiState.THINKING,
+                agentEmojiPath = null,
                 pendingImages = emptyList(),
             )
         }
@@ -305,10 +311,15 @@ class ChatViewModel(
             }
             "dispatch" -> {
                 val agents = event.agentsDispatched.joinToString("、").ifBlank { "团团" }
+                // 匹配第一个派发 Agent 的 working 表情
+                val agentEmoji = event.agentsDispatched.firstNotNullOfOrNull { name ->
+                    AgentType.fromName(name)?.let { getAgentEmojiPath(it, AgentEmojiState.WORKING) }
+                }
                 _uiState.update {
                     it.copy(
                         agentStatus = "团团派出了：$agents",
                         emojiState = EmojiState.WORKING,
+                        agentEmojiPath = agentEmoji,
                     )
                 }
             }
@@ -336,19 +347,29 @@ class ChatViewModel(
                     // 兼容：从 content 中解析 [IMAGE]url[/IMAGE] 标记
                     extractImageUrls(event.content).forEach { newImages.add(it) }
                 }
+                // 匹配完成 Agent 的 done 表情
+                val agentEmoji = AgentType.fromName(event.agentName)?.let {
+                    getAgentEmojiPath(it, AgentEmojiState.DONE)
+                }
                 _uiState.update {
                     it.copy(
                         agentStatus = msg,
                         agentEvents = it.agentEvents + event,
                         pendingImages = it.pendingImages + newImages,
+                        agentEmojiPath = agentEmoji,
                     )
                 }
             }
             "agent_error" -> {
+                // 匹配出错 Agent 的 error 表情
+                val agentEmoji = AgentType.fromName(event.agentName)?.let {
+                    getAgentEmojiPath(it, AgentEmojiState.ERROR)
+                }
                 _uiState.update {
                     it.copy(
                         agentStatus = "${event.agentName}出错",
                         agentEvents = it.agentEvents + event,
+                        agentEmojiPath = agentEmoji,
                     )
                 }
             }
@@ -386,11 +407,17 @@ class ChatViewModel(
                     _uiState.update {
                         it.copy(
                             messages = it.messages + aiMessage,
-                            streamingText = "",
-                            agentStatus = null,
-                            pendingImages = emptyList(),
                         )
                     }
+                }
+                // 无条件清理流式状态，避免 [IMAGE] 标记泄露和状态残留
+                _uiState.update {
+                    it.copy(
+                        streamingText = "",
+                        agentStatus = null,
+                        pendingImages = emptyList(),
+                        agentEmojiPath = null,
+                    )
                 }
                 // 智能选择完成表情，3 秒后自动回 idle
                 val doneEmoji = chooseDoneEmoji(cleanedText)

@@ -9,6 +9,7 @@ import android.webkit.WebViewClient
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -16,8 +17,11 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -49,12 +53,15 @@ actual fun PanoramaViewer(
     val context = androidx.compose.ui.platform.LocalContext.current
 
     var htmlPath by remember { mutableStateOf<String?>(null) }
+    var loadError by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(imageUrl) {
         if (imageUrl.isEmpty()) {
             htmlPath = null
+            loadError = null
             return@LaunchedEffect
         }
+        loadError = null
         htmlPath = withContext(Dispatchers.IO) {
             try {
                 val dir = File(context.cacheDir, "panorama_${System.currentTimeMillis()}")
@@ -80,7 +87,11 @@ actual fun PanoramaViewer(
                     }
                     imageUrl.startsWith("http://") || imageUrl.startsWith("https://") -> {
                         val url = java.net.URL(imageUrl)
-                        url.openStream().use { it.readBytes() }
+                        val conn = url.openConnection() as java.net.HttpURLConnection
+                        conn.connectTimeout = 15000
+                        conn.readTimeout = 30000
+                        conn.useCaches = false
+                        conn.inputStream.use { it.readBytes() }
                     }
                     else -> {
                         try {
@@ -104,6 +115,7 @@ actual fun PanoramaViewer(
                 "file://${dir.absolutePath}/index.html"
             } catch (e: Exception) {
                 Log.e("PanoramaViewer", "Failed to prepare panorama files", e)
+                loadError = "全景图加载失败: ${e.message}"
                 null
             }
         }
@@ -176,5 +188,38 @@ actual fun PanoramaViewer(
             factory = { webView },
             modifier = Modifier.fillMaxSize(),
         )
+
+        // 错误提示覆盖层（资源加载失败时显示）
+        loadError?.let { errorMsg ->
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black),
+                contentAlignment = Alignment.Center,
+            ) {
+                androidx.compose.material3.Text(
+                    text = errorMsg,
+                    color = Color.White,
+                    style = androidx.compose.material3.MaterialTheme.typography.bodyMedium,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(32.dp),
+                )
+            }
+        }
+
+        // 加载中提示（htmlPath 还没准备好且没有错误时）
+        if (htmlPath == null && loadError == null && imageUrl.isNotEmpty()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black),
+                contentAlignment = Alignment.Center,
+            ) {
+                androidx.compose.material3.CircularProgressIndicator(
+                    color = Color.White,
+                    strokeWidth = 3.dp,
+                )
+            }
+        }
     }
 }
