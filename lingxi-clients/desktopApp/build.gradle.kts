@@ -49,10 +49,22 @@ compose.desktop {
             copyright = "Copyright 2026 mvpdark. All rights reserved."
             vendor = "mvpdark"
 
-            // 显式包含 java.net.http 模块 — ktor-client-java 引擎依赖 JDK 的 java.net.http.HttpClient
-            // jlink 默认依赖分析无法检测到运行时通过 ServiceLoader 加载的模块
-            // 缺失会导致 Win64 安装包启动失败：java/net/http/HttpClient$Version
-            modules("java.net.http")
+            // 显式声明 jlink 所需的全部 JDK 模块
+            // Compose 插件不会自动检测（官方文档明确说明），缺失会导致运行时
+            // ClassNotFoundException / "Failed to launch JVM"
+            // 特别注意：java.prefs 缺失会导致 Koin 启动时 Preferences 类加载失败 → 立即崩溃
+            //          jdk.crypto.ec 缺失会导致 HTTPS TLS 握手失败（ServiceLoader 延迟加载，jdeps 检测不到）
+            modules(
+                "java.desktop",           // Compose Desktop (Swing/AWT)、ImageIO、BufferedImage、JFileChooser
+                "java.logging",           // ktor-client-logging、java.util.logging
+                "java.management",        // onnxruntime JMX、Koin
+                "java.naming",            // JNDI（日志/SSL 间接依赖）
+                "java.net.http",          // ktor-client-java 引擎（HttpClient）
+                "java.prefs",             // TokenStore 的 java.util.prefs.Preferences（Koin 启动时即加载）
+                "jdk.crypto.cryptoki",    // HTTPS TLS — PKCS11 提供者（ServiceLoader 延迟加载）
+                "jdk.crypto.ec",          // HTTPS TLS — ECC 算法（TLS 1.3 必需，ServiceLoader 延迟加载）
+                "jdk.unsupported",        // sun.misc.Unsafe（底层库依赖）
+            )
 
             windows {
                 menuGroup = "Lingxi"
@@ -62,7 +74,7 @@ compose.desktop {
                 // 当前 ICO 文件导致 "Input length = 1" 错误，先用默认图标让 MSI 打包成功
                 // iconFile.set(project.layout.projectDirectory.file("resources/windows/lingxi.ico"))
                 // 捆绑 JRE，无需用户预装 Java
-                jvmArgs += listOf("-Xmx2g", "-Dfile.encoding=UTF-8")
+                jvmArgs += listOf("-Xmx1g", "-Dfile.encoding=UTF-8")
             }
 
             macOS {
@@ -72,7 +84,7 @@ compose.desktop {
                 iconFile.set(project.layout.projectDirectory.file("resources/macos/lingxi.icns"))
                 // 最低系统版本 11.0（Big Sur），同时支持 Intel 和 Apple Silicon
                 minimumSystemVersion = "11.0"
-                jvmArgs += listOf("-Xmx2g", "-Dfile.encoding=UTF-8")
+                jvmArgs += listOf("-Xmx1g", "-Dfile.encoding=UTF-8")
                 // 构建号（CFBundleVersion），与 packageVersion 分开
                 packageBuildVersion = System.getenv("LINGXI_VERSION_NAME") ?: "1.0.0"
             }

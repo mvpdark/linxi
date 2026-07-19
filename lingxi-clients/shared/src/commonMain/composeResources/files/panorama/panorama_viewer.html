@@ -49,6 +49,9 @@ window.__loadPanorama = function(url) {
     viewer.on('loadError', function() {
       document.getElementById('hint').textContent = '全景图加载失败';
     });
+    viewer.on('error', function() {
+      document.getElementById('hint').textContent = '全景图加载失败';
+    });
     // 首次交互后隐藏提示
     el.addEventListener('mousedown', hideHint, { once: true });
     el.addEventListener('touchstart', hideHint, { once: true });

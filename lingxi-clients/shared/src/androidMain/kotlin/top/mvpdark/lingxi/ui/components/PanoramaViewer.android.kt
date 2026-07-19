@@ -111,11 +111,13 @@ actual fun PanoramaViewer(
                 val htmlTemplate = readResourceBytes("files/panorama/panorama_viewer.html").decodeToString()
                 val html = htmlTemplate
                     // 页面加载后自动调用 __loadPanorama("panorama.jpg")
+                    // 添加 __panoLoaded 检查防止与 onPageFinished 中的调用重复
                     .replace(
                         "</body>",
                         """<script>
                         window.addEventListener('load', function() {
-                            if (typeof pannellum !== 'undefined') {
+                            if (typeof pannellum !== 'undefined' && !window.__panoLoaded) {
+                                window.__panoLoaded = true;
                                 window.__loadPanorama('panorama.jpg');
                             }
                         });
