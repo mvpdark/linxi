@@ -3,6 +3,7 @@ package top.mvpdark.lingxi.di
 import org.koin.dsl.module
 import top.mvpdark.lingxi.core.network.PlatformContext
 import top.mvpdark.lingxi.core.network.TokenStore
+import top.mvpdark.lingxi.data.local.LocalMessageStore
 import top.mvpdark.lingxi.sam.SamService
 
 /**
@@ -34,5 +35,10 @@ val platformModule = module {
         val ctx = AndroidAppContextHolder.context
             ?: error("AndroidAppContextHolder 未初始化，请在 LingxiApplication.onCreate 中赋值")
         SamService(ctx)
+    }
+    single {
+        val ctx = AndroidAppContextHolder.context
+            ?: error("AndroidAppContextHolder 未初始化，请在 LingxiApplication.onCreate 中赋值")
+        LocalMessageStore(ctx)
     }
 }

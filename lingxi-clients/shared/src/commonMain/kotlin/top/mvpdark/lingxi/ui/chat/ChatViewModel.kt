@@ -11,6 +11,8 @@ import top.mvpdark.lingxi.data.model.AgentEvent
 import top.mvpdark.lingxi.data.model.ChatMessage
 import top.mvpdark.lingxi.data.model.ChatSession
 import top.mvpdark.lingxi.core.util.currentTimeMillis
+import top.mvpdark.lingxi.data.local.ImageCacheManager
+import top.mvpdark.lingxi.data.local.LocalMessageStore
 import top.mvpdark.lingxi.data.repository.ChatRepository
 import top.mvpdark.lingxi.ui.emoji.EmojiState
 import top.mvpdark.lingxi.ui.emoji.chooseDoneEmoji
@@ -49,6 +51,8 @@ data class ChatUiState(
  */
 class ChatViewModel(
     private val chatRepository: ChatRepository,
+    private val localMessageStore: LocalMessageStore,
+    private val imageCacheManager: ImageCacheManager,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ChatUiState())
@@ -161,7 +165,7 @@ class ChatViewModel(
         }
     }
 
-    /** 选择会话并加载历史消息。 */
+    /** 选择会话并加载历史消息（从本地存储加载，不依赖后端）。 */
     fun selectSession(sessionId: String) {
         if (_uiState.value.currentSessionId == sessionId) return
         viewModelScope.launch {
@@ -176,13 +180,16 @@ class ChatViewModel(
                     error = null,
                 )
             }
-            val result: Result<List<ChatMessage>> = runCatching { chatRepository.getHistory(sessionId) }
+            // 从本地存储加载历史消息（所有消息和图片都保存在客户端）
+            val result: Result<List<ChatMessage>> = runCatching {
+                localMessageStore.getMessages(sessionId)
+            }
             result
                 .onSuccess { history ->
                     _uiState.update { it.copy(messages = history) }
                 }
                 .onFailure { e ->
-                    _uiState.update { it.copy(error = "加载历史失败: ${e.message}") }
+                    _uiState.update { it.copy(error = "加载本地历史失败: ${e.message}") }
                 }
         }
     }
@@ -251,13 +258,20 @@ class ChatViewModel(
 
             val currentSessionId = sessionId!!
 
+            // 用户图片先缓存到本地（如果有网络图片或data URL）
+            val userImageLocal = if (pendingImage.isNotEmpty()) {
+                runCatching { imageCacheManager.cacheImages(listOf(pendingImage)) }
+                    .getOrDefault(listOf(pendingImage))
+                    .firstOrNull() ?: pendingImage
+            } else ""
+
             // 追加用户消息到列表
             val userMessage = ChatMessage(
                 id = "local_${currentTimeMillis()}",
                 sessionId = currentSessionId,
                 role = "user",
                 content = pendingText,
-                images = if (pendingImage.isNotEmpty()) listOf(pendingImage) else emptyList(),
+                images = if (userImageLocal.isNotEmpty()) listOf(userImageLocal) else emptyList(),
                 timestamp = "",
             )
             _uiState.update {
@@ -266,6 +280,8 @@ class ChatViewModel(
                     messages = it.messages + userMessage,
                 )
             }
+            // 用户消息保存到本地存储
+            runCatching { localMessageStore.saveMessage(currentSessionId, userMessage) }
 
             // 流式接收 AgentEvent
             chatRepository.sendMessageStream(currentSessionId, pendingText, pendingImage)
@@ -396,12 +412,17 @@ class ChatViewModel(
                 // 清理文本中的 [IMAGE]url[/IMAGE] 标记（已提取到 images）
                 val cleanedText = cleanImageMarkers(fullText)
                 if (cleanedText.isNotEmpty() || collectedImages.isNotEmpty()) {
+                    // 图片先下载缓存到本地，保存本地路径（不依赖后端图片URL）
+                    val localImages = if (collectedImages.isNotEmpty()) {
+                        runCatching { imageCacheManager.cacheImages(collectedImages) }
+                            .getOrDefault(collectedImages)
+                    } else emptyList()
                     val aiMessage = ChatMessage(
                         id = "ai_${currentTimeMillis()}",
                         sessionId = sessionId,
                         role = "assistant",
                         content = cleanedText,
-                        images = collectedImages,
+                        images = localImages,
                         timestamp = "",
                     )
                     _uiState.update {
@@ -409,6 +430,8 @@ class ChatViewModel(
                             messages = it.messages + aiMessage,
                         )
                     }
+                    // AI消息保存到本地存储
+                    runCatching { localMessageStore.saveMessage(sessionId, aiMessage) }
                 }
                 // 无条件清理流式状态，避免 [IMAGE] 标记泄露和状态残留
                 _uiState.update {

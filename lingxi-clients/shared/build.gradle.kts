@@ -9,6 +9,10 @@ plugins {
     alias(libs.plugins.android.library)
 }
 
+compose.resources {
+    generateResClass = always
+}
+
 kotlin {
     androidTarget {
         @OptIn(ExperimentalKotlinGradlePluginApi::class)

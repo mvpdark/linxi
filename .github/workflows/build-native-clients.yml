@@ -98,7 +98,7 @@ jobs:
           LINGXI_KEYSTORE_PASSWORD: ${{ secrets.LINGXI_KEYSTORE_PASSWORD }}
           LINGXI_KEY_ALIAS: ${{ secrets.LINGXI_KEY_ALIAS }}
           LINGXI_KEY_PASSWORD: ${{ secrets.LINGXI_KEY_PASSWORD }}
-        run: ./gradlew :androidApp:assembleRelease
+        run: ./gradlew clean :androidApp:assembleRelease
 
       - name: Rename APK with version
         run: |
@@ -169,7 +169,7 @@ jobs:
 
       - name: Build Desktop MSI
         id: build-msi
-        run: ./gradlew :desktopApp:packageReleaseMsi
+        run: ./gradlew clean :desktopApp:packageReleaseMsi
         shell: bash
         continue-on-error: true
 
@@ -276,7 +276,7 @@ jobs:
           "
 
       - name: Build Desktop DMG (Apple Silicon)
-        run: ./gradlew :desktopApp:packageDmg
+        run: ./gradlew clean :desktopApp:packageDmg
 
       - name: Upload DMG (arm64)
         uses: actions/upload-artifact@v4

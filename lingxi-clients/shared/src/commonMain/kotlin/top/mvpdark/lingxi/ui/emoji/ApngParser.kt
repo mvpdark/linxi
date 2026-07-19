@@ -120,6 +120,10 @@ class ApngParser {
         // 当 fcTL 出现在 IDAT 之前时（APNG 第一帧标准格式），
         // IDAT 是当前帧的图像数据，需要累积起来
         val currentFrameIdatChunks = mutableListOf<Chunk>()
+        // 累积同一帧的多个 fdAT chunk 数据（每个已跳过 4 字节序号）
+        // APNG 规范允许一帧的图像数据分成多个 fdAT chunk（每个约 64KB），
+        // 必须在遇到下一个 fcTL 或 IEND 时才合并构建帧
+        val currentFrameFdatChunks = mutableListOf<ByteArray>()
 
         var i = 0
         var currentFctl: Chunk? = null
@@ -128,19 +132,33 @@ class ApngParser {
             val chunk = chunks[i]
             when (chunk.type) {
                 "fcTL" -> {
-                    // 遇到新的 fcTL：如果之前有 fcTL 且累积了 IDAT
-                    // （fcTL 在 IDAT 之前的情况），先构建那一帧
-                    if (currentFctl != null && currentFrameIdatChunks.isNotEmpty()) {
-                        val frame = buildFrameFromIdat(
-                            fctl = currentFctl,
-                            idatChunks = currentFrameIdatChunks.toList(),
-                            width = width,
-                            height = height,
-                            ihdrRaw = ihdrRaw,
-                            ancillaryChunks = ancillaryChunks,
-                        )
-                        frames.add(frame)
-                        currentFrameIdatChunks.clear()
+                    // 遇到新的 fcTL：如果之前有 fcTL 且累积了帧数据，先构建那一帧
+                    if (currentFctl != null) {
+                        if (currentFrameFdatChunks.isNotEmpty()) {
+                            // fdAT 帧：合并所有 fdAT 分片数据构建帧
+                            val frame = buildFrame(
+                                fctl = currentFctl,
+                                idatData = mergeFdatChunks(currentFrameFdatChunks),
+                                width = width,
+                                height = height,
+                                ihdrRaw = ihdrRaw,
+                                ancillaryChunks = ancillaryChunks,
+                            )
+                            frames.add(frame)
+                            currentFrameFdatChunks.clear()
+                        } else if (currentFrameIdatChunks.isNotEmpty()) {
+                            // IDAT 帧（fcTL 在 IDAT 之前的情况）
+                            val frame = buildFrameFromIdat(
+                                fctl = currentFctl,
+                                idatChunks = currentFrameIdatChunks.toList(),
+                                width = width,
+                                height = height,
+                                ihdrRaw = ihdrRaw,
+                                ancillaryChunks = ancillaryChunks,
+                            )
+                            frames.add(frame)
+                            currentFrameIdatChunks.clear()
+                        }
                     }
                     currentFctl = chunk
                 }
@@ -156,28 +174,29 @@ class ApngParser {
                 }
                 "fdAT" -> {
                     if (currentFctl != null) {
-                        // 如果之前累积了 IDAT（fcTL 在 IDAT 之前的情况），先处理那一帧
-                        if (currentFrameIdatChunks.isNotEmpty()) {
-                            val idatFrame = buildFrameFromIdat(
-                                fctl = currentFctl,
-                                idatChunks = currentFrameIdatChunks.toList(),
-                                width = width,
-                                height = height,
-                                ihdrRaw = ihdrRaw,
-                                ancillaryChunks = ancillaryChunks,
-                            )
-                            frames.add(idatFrame)
-                            currentFrameIdatChunks.clear()
+                        // 提取 fdAT chunk 数据（跳过前 4 字节序号），累积到 currentFrameFdatChunks
+                        // 不立即构建帧，等待下一个 fcTL 或 IEND 触发合并
+                        val idatData = if (chunk.data.size > 4) {
+                            chunk.data.copyOfRange(4, chunk.data.size)
+                        } else {
+                            ByteArray(0)
                         }
+                        currentFrameFdatChunks.add(idatData)
+                    }
+                }
+                "IEND" -> {
+                    // IEND：如果当前帧累积了 fdAT 数据，构建最后一帧
+                    if (currentFctl != null && currentFrameFdatChunks.isNotEmpty()) {
                         val frame = buildFrame(
                             fctl = currentFctl,
-                            fdat = chunk,
+                            idatData = mergeFdatChunks(currentFrameFdatChunks),
                             width = width,
                             height = height,
                             ihdrRaw = ihdrRaw,
                             ancillaryChunks = ancillaryChunks,
                         )
                         frames.add(frame)
+                        currentFrameFdatChunks.clear()
                         currentFctl = null
                     }
                 }
@@ -187,17 +206,31 @@ class ApngParser {
 
         // 循环结束后，处理可能残留的最后一帧
         // （fcTL 在 IDAT 之前，且 IDAT 是最后一帧，没有后续 fcTL/fdAT 触发构建）
-        if (currentFctl != null && currentFrameIdatChunks.isNotEmpty()) {
-            val frame = buildFrameFromIdat(
-                fctl = currentFctl,
-                idatChunks = currentFrameIdatChunks.toList(),
-                width = width,
-                height = height,
-                ihdrRaw = ihdrRaw,
-                ancillaryChunks = ancillaryChunks,
-            )
-            frames.add(frame)
-            currentFrameIdatChunks.clear()
+        if (currentFctl != null) {
+            if (currentFrameFdatChunks.isNotEmpty()) {
+                // 残留的 fdAT 帧（正常情况下 IEND 已处理，此处为防御性兜底）
+                val frame = buildFrame(
+                    fctl = currentFctl,
+                    idatData = mergeFdatChunks(currentFrameFdatChunks),
+                    width = width,
+                    height = height,
+                    ihdrRaw = ihdrRaw,
+                    ancillaryChunks = ancillaryChunks,
+                )
+                frames.add(frame)
+                currentFrameFdatChunks.clear()
+            } else if (currentFrameIdatChunks.isNotEmpty()) {
+                val frame = buildFrameFromIdat(
+                    fctl = currentFctl,
+                    idatChunks = currentFrameIdatChunks.toList(),
+                    width = width,
+                    height = height,
+                    ihdrRaw = ihdrRaw,
+                    ancillaryChunks = ancillaryChunks,
+                )
+                frames.add(frame)
+                currentFrameIdatChunks.clear()
+            }
         }
 
         // 处理默认帧（IDAT 在第一个 fcTL 之前，是静态 fallback）
@@ -348,24 +381,37 @@ class ApngParser {
     }
 
     /**
-     * 构建帧 PNG：从 fdAT 数据创建完整的 PNG 字节流。
+     * 合并同一帧的多个 fdAT chunk 数据。
+     *
+     * 每个分片在累积时已剥离 4 字节序号前缀，此处仅做字节拼接，
+     * 得到的 [ByteArray] 等价于该帧完整的 IDAT 数据，可直接用于 PNG 构建。
+     */
+    private fun mergeFdatChunks(fdatChunks: List<ByteArray>): ByteArray {
+        val totalSize = fdatChunks.sumOf { it.size }
+        val result = ByteArray(totalSize)
+        var offset = 0
+        for (chunk in fdatChunks) {
+            System.arraycopy(chunk, 0, result, offset, chunk.size)
+            offset += chunk.size
+        }
+        return result
+    }
+
+    /**
+     * 构建帧 PNG：从合并后的 fdAT 数据创建完整的 PNG 字节流。
+     *
+     * 注意：[idatData] 应为同一帧所有 fdAT chunk 合并后的数据，
+     * 且每个分片的 4 字节序号前缀已在累积时剥离（见 [mergeFdatChunks]）。
      */
     private fun buildFrame(
         fctl: Chunk,
-        fdat: Chunk,
+        idatData: ByteArray,
         width: Int,
         height: Int,
         ihdrRaw: ByteArray,
         ancillaryChunks: List<ByteArray>,
     ): ApngFrame {
         val fc = parseFctl(fctl.data)
-
-        // fdAT 数据前 4 字节是序号，其余是 IDAT 数据
-        val idatData = if (fdat.data.size > 4) {
-            fdat.data.copyOfRange(4, fdat.data.size)
-        } else {
-            ByteArray(0)
-        }
 
         // 如果帧尺寸与原图不同，需要修改 IHDR 中的宽高
         val frameIhdr = if (fc.width != width || fc.height != height) {
@@ -627,7 +673,7 @@ private object Crc32 {
         for (n in 0..255) {
             var c = n
             for (k in 0..7) {
-                c = if (c and 1 != 0) (-0x1247CDE0) xor (c ushr 1) else c ushr 1
+                c = if (c and 1 != 0) (-0x12477CE0) xor (c ushr 1) else c ushr 1
             }
             table[n] = c
         }

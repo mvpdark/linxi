@@ -1,11 +1,15 @@
 package top.mvpdark.lingxi.di
 
+import io.ktor.client.HttpClient
+import io.ktor.client.plugins.HttpTimeout
 import org.koin.core.module.dsl.viewModel
 import org.koin.core.module.dsl.singleOf
 import org.koin.core.qualifier.named
 import org.koin.dsl.module
 import top.mvpdark.lingxi.core.network.ApiClient
+import top.mvpdark.lingxi.core.network.createEngine
 import top.mvpdark.lingxi.core.util.UrlResolver
+import top.mvpdark.lingxi.data.local.ImageCacheManager
 import top.mvpdark.lingxi.data.repository.AuthRepository
 import top.mvpdark.lingxi.data.repository.ChatRepository
 import top.mvpdark.lingxi.data.repository.ImageEditRepository
@@ -44,9 +48,23 @@ val appModule = module {
     singleOf(::PanoramaRepository)
     singleOf(::UpdateRepository)
 
+    // 图片下载专用 HttpClient（无 JSON 协商、无鉴权插件，用于下载网络图片到本地缓存）
+    single(named("imageHttpClient")) {
+        HttpClient(createEngine()) {
+            install(HttpTimeout) {
+                requestTimeoutMillis = 30_000
+                connectTimeoutMillis = 15_000
+                socketTimeoutMillis = 30_000
+            }
+        }
+    }
+
+    // 本地消息与图片缓存管理器（依赖 LocalMessageStore，由 platformModule 提供）
+    single { ImageCacheManager(get(named("imageHttpClient")), get()) }
+
     // ViewModel
     viewModel { AuthViewModel(get()) }
-    viewModel { ChatViewModel(get()) }
+    viewModel { ChatViewModel(get(), get(), get()) }
     viewModel { ImageEditViewModel(get(), get()) }
     viewModel { PanoramaViewModel(get()) }
     viewModel { UpdateViewModel(get()) }
