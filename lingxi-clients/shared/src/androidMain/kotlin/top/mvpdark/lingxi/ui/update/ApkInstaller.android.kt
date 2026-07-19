@@ -49,7 +49,7 @@ actual class ApkInstaller actual constructor() {
                 client.use {
                     val response: HttpResponse = it.get(downloadUrl)
                     val channel: ByteReadChannel = response.body()
-                    val totalBytes = response.contentLength() ?: -1L
+                    val totalBytes = response.headers["Content-Length"]?.toLongOrNull() ?: -1L
                     var downloadedBytes = 0L
                     val buffer = ByteArray(8192)
 

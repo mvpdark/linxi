@@ -44,6 +44,8 @@ android {
     }
 
     // 签名配置：从环境变量读取（GitHub Actions 注入），本地回退到 debug
+    // 注意：不在此处 throw GradleException，因为 Desktop 构建也会配置此模块
+    // CI 的 keystore 强制检查由 workflow 的 "Decode release keystore" 步骤保证
     signingConfigs {
         create("release") {
             val keystorePath = System.getenv("LINGXI_KEYSTORE_PATH")
@@ -52,14 +54,8 @@ android {
                 storePassword = System.getenv("LINGXI_KEYSTORE_PASSWORD") ?: ""
                 keyAlias = System.getenv("LINGXI_KEY_ALIAS") ?: ""
                 keyPassword = System.getenv("LINGXI_KEY_PASSWORD") ?: ""
-            } else if (System.getenv("CI") != null) {
-                // CI 环境下必须提供正式 keystore，否则直接失败
-                throw GradleException(
-                    "CI build requires LINGXI_KEYSTORE_PATH to be set. " +
-                        "Please configure LINGXI_KEYSTORE_BASE64 secret in GitHub.",
-                )
             } else {
-                // 本地开发：使用 debug keystore
+                // 本地开发、Desktop 构建、或 CI 未注入 keystore：使用 debug keystore
                 storeFile = signingConfigs.getByName("debug").storeFile
                 storePassword = "android"
                 keyAlias = "androiddebugkey"
