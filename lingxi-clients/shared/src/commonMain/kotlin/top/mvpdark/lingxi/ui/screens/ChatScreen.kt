@@ -198,13 +198,14 @@ fun ChatScreen(
                             }
                         }
 
-                        // 流式回复气泡（实时追加 + 团团表情）
-                        if (state.streamingText.isNotEmpty()) {
+                        // 流式回复气泡（实时追加 + 团团表情 + 流式期间收到的图片）
+                        if (state.streamingText.isNotEmpty() || state.pendingImages.isNotEmpty()) {
                             item {
                                 Column {
                                     ChatBubble(
                                         text = state.streamingText,
                                         isUser = false,
+                                        images = state.pendingImages,
                                     )
                                     if (state.isSending) {
                                         TypingIndicator()

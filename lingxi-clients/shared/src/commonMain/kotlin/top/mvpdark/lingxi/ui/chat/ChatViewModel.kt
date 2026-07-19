@@ -33,6 +33,8 @@ data class ChatUiState(
     val error: String? = null,
     /** 团团表情状态（APNG 动画）。 */
     val emojiState: EmojiState = EmojiState.IDLE,
+    /** 流式期间收集的图片 URL（搜索图 + AI 制图），done 时挂到 AI 消息。 */
+    val pendingImages: List<String> = emptyList(),
 )
 
 /**
@@ -46,6 +48,30 @@ class ChatViewModel(
 
     private val _uiState = MutableStateFlow(ChatUiState())
     val uiState: StateFlow<ChatUiState> = _uiState.asStateFlow()
+
+    /**
+     * 从文本中提取所有 [IMAGE]url[/IMAGE] 标记的图片 URL。
+     * 用于解析 image_generator 返回的图片标记。
+     */
+    private fun extractImageUrls(text: String): List<String> {
+        val result = mutableListOf<String>()
+        val regex = Regex("""\[IMAGE\]\s*(\S+?)\s*\[/IMAGE\]""")
+        regex.findAll(text).forEach { match ->
+            val url = match.groupValues.getOrNull(1)?.trim()
+            if (!url.isNullOrEmpty()) result.add(url)
+        }
+        return result
+    }
+
+    /**
+     * 清除文本中的 [IMAGE]url[/IMAGE] 标记（图片已提取到 images 列表）。
+     * 同时清理多余的空行。
+     */
+    private fun cleanImageMarkers(text: String): String {
+        val cleaned = text.replace(Regex("""\[IMAGE\]\s*\S+?\s*\[/IMAGE\]"""), "")
+        // 清理多余的空行
+        return cleaned.replace(Regex("\n{3,}"), "\n\n").trim()
+    }
 
     /** 初始化：加载会话列表。 */
     init {
@@ -185,6 +211,7 @@ class ChatViewModel(
                 agentEvents = emptyList(),
                 error = null,
                 emojiState = EmojiState.THINKING,
+                pendingImages = emptyList(),
             )
         }
 
@@ -286,10 +313,20 @@ class ChatViewModel(
             }
             "agent_done" -> {
                 val msg = "${event.agentName}完成"
+                // image_generator 完成时，提取图片 URL
+                val newImages = mutableListOf<String>()
+                if (event.agentKey == "image_generator") {
+                    if (event.imageUrl.isNotEmpty()) {
+                        newImages.add(event.imageUrl)
+                    }
+                    // 兼容：从 content 中解析 [IMAGE]url[/IMAGE] 标记
+                    extractImageUrls(event.content).forEach { newImages.add(it) }
+                }
                 _uiState.update {
                     it.copy(
                         agentStatus = msg,
                         agentEvents = it.agentEvents + event,
+                        pendingImages = it.pendingImages + newImages,
                     )
                 }
             }
@@ -308,19 +345,28 @@ class ChatViewModel(
                 }
             }
             "search_image" -> {
+                // 搜索图片：content 字段就是图片 URL，收集到 pendingImages
+                val imgUrl = event.content.trim()
                 _uiState.update {
-                    it.copy(agentEvents = it.agentEvents + event)
+                    it.copy(
+                        agentEvents = it.agentEvents + event,
+                        pendingImages = if (imgUrl.isNotEmpty()) it.pendingImages + imgUrl else it.pendingImages,
+                    )
                 }
             }
             "done" -> {
                 // 流结束：把累积的文本固化成一条 assistant 消息
                 val fullText = _uiState.value.streamingText
-                if (fullText.isNotEmpty()) {
+                val collectedImages = _uiState.value.pendingImages
+                // 清理文本中的 [IMAGE]url[/IMAGE] 标记（已提取到 images）
+                val cleanedText = cleanImageMarkers(fullText)
+                if (cleanedText.isNotEmpty() || collectedImages.isNotEmpty()) {
                     val aiMessage = ChatMessage(
                         id = "ai_${currentTimeMillis()}",
                         sessionId = sessionId,
                         role = "assistant",
-                        content = fullText,
+                        content = cleanedText,
+                        images = collectedImages,
                         timestamp = "",
                     )
                     _uiState.update {
@@ -328,11 +374,12 @@ class ChatViewModel(
                             messages = it.messages + aiMessage,
                             streamingText = "",
                             agentStatus = null,
+                            pendingImages = emptyList(),
                         )
                     }
                 }
                 // 智能选择完成表情，3 秒后自动回 idle
-                val doneEmoji = chooseDoneEmoji(fullText)
+                val doneEmoji = chooseDoneEmoji(cleanedText)
                 setEmojiWithAutoRevert(doneEmoji)
             }
             "error" -> {

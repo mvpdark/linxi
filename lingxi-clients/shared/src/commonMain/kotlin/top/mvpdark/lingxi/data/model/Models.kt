@@ -112,6 +112,8 @@ data class AgentEvent(
     @SerialName("agents_dispatched") val agentsDispatched: List<String> = emptyList(),
     @SerialName("route_reason") val routeReason: String = "",
     val error: String = "",
+    /** AI 制图完成后附带的图片 URL（后端 image_generator 专用）。 */
+    @SerialName("image_url") val imageUrl: String = "",
 )
 
 /** WebSocket 发送的消息帧。 */
