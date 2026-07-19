@@ -1120,9 +1120,11 @@ async def vlm_detect(request: Request, file: UploadFile = File(...)):
                 # 为每个物品添加 id
                 for i, obj in enumerate(data.get("objects", []), 1):
                     obj["id"] = i
+                # 客户端依赖 success 字段判断检测是否成功，必须显式返回
+                data["success"] = True
                 return data
             except json.JSONDecodeError:
-                return {"objects": [], "raw": result.content}
+                return {"success": False, "objects": [], "raw": result.content}
         else:
             logger.error("vlm-detect 上游失败: %s", result.error)
             await _refund_on_failure(user_id, _charged)
@@ -1333,18 +1335,21 @@ async def image_edit_annotated(
         if result.get("success") and result.get("images"):
             img_path = result["images"][0]["path"]
             img_bytes = Path(img_path).read_bytes()
+            # 与 /api/image-edit 保持一致：返回 base64 data URL，
+            # 客户端 ImageEditResponse 只认 image 字段，不认 url 字段
+            b64 = base64.b64encode(img_bytes).decode("utf-8")
             dest_name = f"generated_{int(time.time()*1000)}_{uuid.uuid4().hex[:6]}.png"
             if webdav.enabled:
-                # 结果图写入 WebDAV 用户目录，并清理 image_service 临时文件
+                # 结果图同时写入 WebDAV 用户目录（保留可追溯），并清理 image_service 临时文件
                 url = await webdav.put_file(username, dest_name, img_bytes)
                 try:
                     os.unlink(img_path)
                 except OSError:
                     pass
-                return {"success": True, "url": url}
+                return {"success": True, "image": f"data:image/png;base64,{b64}", "url": url}
             dest = _ASSETS_DIR / dest_name
             dest.write_bytes(img_bytes)
-            return {"success": True, "url": f"/uploads/{dest.name}"}
+            return {"success": True, "image": f"data:image/png;base64,{b64}", "url": f"/uploads/{dest.name}"}
         else:
             logger.error("image-edit-annotated 上游失败: %s", result.get("error"))
             await _refund_on_failure(user_id, _charged)

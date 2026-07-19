@@ -79,3 +79,28 @@ data class ImageEditResponse(
     val url: String = "",
     val error: String = "",
 )
+
+/** /api/sam-segment 请求中的物体格式（发给后端）。 */
+@Serializable
+data class SamSegmentRequestObject(
+    val id: Int = 0,
+    val label: String = "",
+    val bbox: List<Float> = emptyList(),
+)
+
+/** /api/sam-segment 响应。 */
+@Serializable
+data class SamSegmentResponse(
+    val success: Boolean = false,
+    val objects: List<SamSegmentObject> = emptyList(),
+    val error: String = "",
+)
+
+/** 后端 SAM 分割返回的单个物体。 */
+@Serializable
+data class SamSegmentObject(
+    val label: String = "",
+    val polygon: List<List<Float>> = emptyList(),
+    @SerialName("mask_png_b64") val maskPngB64: String = "",
+    val bbox: List<Float> = emptyList(),
+)

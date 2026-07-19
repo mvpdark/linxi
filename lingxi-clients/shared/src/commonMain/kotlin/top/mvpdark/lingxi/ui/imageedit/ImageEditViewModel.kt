@@ -154,21 +154,27 @@ class ImageEditViewModel(
                         it.copy(step = Step.Segmenting, samLoading = true)
                     }
 
-                    // 加载 SAM 模型（如果未加载），用 runCatching 防止加载失败阻塞流程
-                    if (!samService.isReady) {
-                        runCatching {
-                            samService.loadModel { progress, _ ->
-                                _uiState.update { it.copy(samProgress = progress) }
-                            }
-                        }.onFailure { e ->
-                            PlatformLogger.e("ImageEditViewModel", "SAM loadModel failed", e)
-                        }
-                    }
-
-                    // 执行分割，失败时回退 bbox 模式
-                    val samResult = runCatching {
-                        samService.segment(bytes, detectedObjects.map { it.id to it.bbox })
+                    // 优先调用后端 SAM 2（后端模型可靠，无需客户端下载模型文件）
+                    var samResult = runCatching {
+                        repository.samSegment(bytes, "image.jpg", detectedObjects.map { it.id to it.bbox })
                     }.getOrNull()
+
+                    // 后端 SAM 失败 → 尝试端侧 SAM（如果可用）
+                    if (samResult == null || !samResult.success) {
+                        PlatformLogger.w("ImageEditViewModel", "Backend SAM failed, trying on-device SAM")
+                        if (!samService.isReady) {
+                            runCatching {
+                                samService.loadModel { progress, _ ->
+                                    _uiState.update { it.copy(samProgress = progress) }
+                                }
+                            }.onFailure { e ->
+                                PlatformLogger.e("ImageEditViewModel", "SAM loadModel failed", e)
+                            }
+                        }
+                        samResult = runCatching {
+                            samService.segment(bytes, detectedObjects.map { it.id to it.bbox })
+                        }.getOrNull()
+                    }
 
                     if (samResult != null && samResult.success) {
                         // 用 polygon 更新 objects

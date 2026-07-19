@@ -8,6 +8,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -20,6 +21,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.jetbrains.compose.resources.InternalResourceApi
 import org.jetbrains.compose.resources.readResourceBytes
+import java.io.File
 
 /**
  * Android 全景查看器：用 WebView 加载本地 Pannellum HTML。
@@ -30,7 +32,18 @@ import org.jetbrains.compose.resources.readResourceBytes
  * 3. 用 [WebView.loadDataWithBaseURL] 加载内联 HTML
  * 4. Kotlin 通过 [WebView.evaluateJavascript] 调用 `window.__loadPanorama(url)` 加载全景图
  *
- * 这样无需依赖 assets 路径，跨模块也能正常工作。
+ * 图片 URL 处理策略（修复 data URL 过长导致 evaluateJavascript 静默失败）：
+ * - data URL（base64）可能高达 2-7MB，直接通过 evaluateJavascript 字符串插值传参
+ *   会导致 IPC 传输失败或 V8 解析超时
+ * - 解决方案：先把 base64 data URL 解码写入缓存临时文件，用 file:// URL 传给 Pannellum
+ * - file:// URL 只有几十个字符，evaluateJavascript 不会失败
+ *
+ * 页面加载时序（修复 500ms 固定延时竞态条件）：
+ * - 用 [WebViewClient.onPageFinished] 回调替代固定延时
+ * - 只有页面真正加载完成后才调用 __loadPanorama
+ *
+ * 生命周期管理（修复 WebView 内存泄漏）：
+ * - [DisposableEffect] 在 Composable 离开时销毁 WebView 并清理临时文件
  */
 @SuppressLint("SetJavaScriptEnabled")
 @OptIn(InternalResourceApi::class)
@@ -43,16 +56,19 @@ actual fun PanoramaViewer(
 
     // 预加载 HTML 内容（含内联的 pannellum.js + pannellum.css）
     var htmlContent by remember { mutableStateOf<String?>(null) }
+    // 页面是否已加载完成（onPageFinished 回调）
+    var pageLoaded by remember { mutableStateOf(false) }
+    // 转换后的本地图片 URL（data URL → file:// URL）
+    var localImageUrl by remember { mutableStateOf("") }
 
+    // 预加载 HTML 内容
     LaunchedEffect(Unit) {
         htmlContent = withContext(Dispatchers.IO) {
             try {
                 val js = readResourceBytes("files/panorama/pannellum.js").decodeToString()
                 val css = readResourceBytes("files/panorama/pannellum.css").decodeToString()
-                // 读取 HTML 模板
                 val html = readResourceBytes("files/panorama/panorama_viewer.html").decodeToString()
-                // 内联 JS 和 CSS：替换 <link> 和 <script src> 为内联标签
-                val inlined = html
+                html
                     .replace(
                         """<link rel="stylesheet" href="pannellum.css">""",
                         "<style>$css</style>",
@@ -61,7 +77,6 @@ actual fun PanoramaViewer(
                         """<script src="pannellum.js"></script>""",
                         "<script>$js</script>",
                     )
-                inlined
             } catch (e: Exception) {
                 android.util.Log.e("PanoramaViewer", "Failed to load resources", e)
                 "<html><body><p style='color:white;text-align:center;margin-top:50%'>全景查看器资源加载失败</p></body></html>"
@@ -69,7 +84,45 @@ actual fun PanoramaViewer(
         }
     }
 
-    // WebView 只创建一次
+    // 把 data URL 写入临时文件，避免 evaluateJavascript 传超大字符串
+    LaunchedEffect(imageUrl) {
+        pageLoaded = false  // 重置页面加载状态
+        if (imageUrl.isNotEmpty()) {
+            localImageUrl = withContext(Dispatchers.IO) {
+                if (imageUrl.startsWith("data:")) {
+                    try {
+                        // 解析 data URL：data:image/png;base64,xxxx
+                        val base64Data = imageUrl.substringAfter("base64,")
+                        val bytes = android.util.Base64.decode(
+                            base64Data,
+                            android.util.Base64.DEFAULT,
+                        )
+                        // 写入缓存目录的临时文件
+                        val tempFile = File(
+                            context.cacheDir,
+                            "panorama_temp_${System.currentTimeMillis()}.png",
+                        )
+                        tempFile.writeBytes(bytes)
+                        android.util.Log.i(
+                            "PanoramaViewer",
+                            "Data URL → temp file: ${tempFile.absolutePath} (${bytes.size} bytes)",
+                        )
+                        "file://${tempFile.absolutePath}"
+                    } catch (e: Exception) {
+                        android.util.Log.e("PanoramaViewer", "Failed to write temp file", e)
+                        imageUrl  // 回退到原始 URL（远程 URL 仍可用）
+                    }
+                } else {
+                    // 非 data URL（http/https），直接使用
+                    imageUrl
+                }
+            }
+        } else {
+            localImageUrl = ""
+        }
+    }
+
+    // WebView 只创建一次，配置 onPageFinished 回调
     val webView = remember {
         WebView(context).apply {
             settings.javaScriptEnabled = true
@@ -78,7 +131,13 @@ actual fun PanoramaViewer(
             settings.allowContentAccess = true
             settings.mediaPlaybackRequiresUserGesture = false
             webChromeClient = WebChromeClient()
-            webViewClient = WebViewClient()
+            // 用 onPageFinished 回调替代固定延时，确保页面真正加载完成
+            webViewClient = object : WebViewClient() {
+                override fun onPageFinished(view: WebView?, url: String?) {
+                    pageLoaded = true
+                    android.util.Log.i("PanoramaViewer", "Page finished loading: $url")
+                }
+            }
         }
     }
 
@@ -97,16 +156,29 @@ actual fun PanoramaViewer(
         }
     }
 
-    // imageUrl 变化时，通过 JS 桥接加载新全景图
-    LaunchedEffect(imageUrl, htmlContent) {
-        if (imageUrl.isNotEmpty() && htmlContent != null) {
-            // 等待 WebView 页面加载完成
-            kotlinx.coroutines.delay(500)
-            // 用 JS 模板字符串传参，避免 data URL 的特殊字符转义问题
-            val js = "try { window.__loadPanorama(`${imageUrl}`); } catch(e) { console.error(e); }"
+    // 页面加载完成 + 本地图片 URL 就绪 → 加载全景图
+    // 只有两个条件同时满足才执行，避免竞态条件
+    LaunchedEffect(localImageUrl, pageLoaded) {
+        if (localImageUrl.isNotEmpty() && pageLoaded) {
+            val js = "try { window.__loadPanorama(`${localImageUrl}`); } catch(e) { console.error('Panorama load error:', e); }"
             webView.post {
                 webView.evaluateJavascript(js, null)
+                android.util.Log.i("PanoramaViewer", "Called __loadPanorama with URL length=${localImageUrl.length}")
             }
+        }
+    }
+
+    // 生命周期：Composable 离开时销毁 WebView 并清理临时文件
+    DisposableEffect(Unit) {
+        onDispose {
+            // 清理缓存目录下的全景图临时文件
+            context.cacheDir.listFiles()?.forEach { file ->
+                if (file.name.startsWith("panorama_temp_")) {
+                    file.delete()
+                }
+            }
+            // 销毁 WebView 避免内存泄漏
+            webView.destroy()
         }
     }
 

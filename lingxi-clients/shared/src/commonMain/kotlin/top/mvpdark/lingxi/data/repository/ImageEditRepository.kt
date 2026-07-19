@@ -17,8 +17,13 @@ import top.mvpdark.lingxi.core.util.toUserMessage
 import top.mvpdark.lingxi.data.model.DetectedObject
 import top.mvpdark.lingxi.data.model.EditRegion
 import top.mvpdark.lingxi.data.model.ImageEditResponse
+import top.mvpdark.lingxi.data.model.SamSegmentRequestObject
+import top.mvpdark.lingxi.data.model.SamSegmentResponse
 import top.mvpdark.lingxi.data.model.UploadResponse
 import top.mvpdark.lingxi.data.model.VlmDetectResponse
+import top.mvpdark.lingxi.data.model.Bbox
+import top.mvpdark.lingxi.sam.SamObject
+import top.mvpdark.lingxi.sam.SamSegmentResult
 
 /**
  * 图像编辑仓库：封装 /api/upload、/api/vlm-detect、/api/image-edit[-annotated] 接口。
@@ -143,6 +148,70 @@ class ImageEditRepository(
                 }
             }
         }
+    }
+
+    /**
+     * 后端 SAM 2 分割（精确轮廓提取）。POST /api/sam-segment。超时 60 秒。
+     *
+     * 后端 SAM 2 使用 sam2.1_hiera_tiny.pt checkpoint，CPU 推理 2-5 秒。
+     * 相比端侧 ONNX 模型，后端 SAM 2 无需客户端下载模型文件，更可靠。
+     *
+     * @param bytes 原图字节流
+     * @param fileName 文件名
+     * @param objects 待分割物体列表 (id, bbox)，bbox 为归一化坐标 0-1
+     * @return SamSegmentResult，成功时 objects 含 polygon 和 maskPngB64
+     */
+    suspend fun samSegment(
+        bytes: ByteArray,
+        fileName: String,
+        objects: List<Pair<Int, Bbox>>,
+    ): SamSegmentResult {
+        // 构建后端期望的 objects JSON：[{"id":1,"label":"","bbox":[x,y,w,h]}, ...]
+        val requestObjects = objects.map { (id, bbox) ->
+            SamSegmentRequestObject(
+                id = id,
+                label = "",
+                bbox = listOf(bbox.x, bbox.y, bbox.w, bbox.h),
+            )
+        }
+        val objectsJson = apiClient.json.encodeToString(requestObjects)
+
+        val response: SamSegmentResponse = requestWithAuthRetry(
+            onError = { SamSegmentResponse(success = false, error = it) },
+        ) {
+            apiClient.httpClient.submitFormWithBinaryData(
+                url = "/api/sam-segment",
+                formData = formData {
+                    appendFile("file", bytes, fileName)
+                    append("objects", objectsJson)
+                },
+            ) {
+                timeout {
+                    requestTimeoutMillis = 60_000
+                    socketTimeoutMillis = 60_000
+                }
+            }
+        }
+
+        if (!response.success) {
+            return SamSegmentResult(success = false, error = response.error)
+        }
+
+        // 后端返回的 objects 列表顺序与输入一致，用 index 匹配 id
+        return SamSegmentResult(
+            success = true,
+            objects = response.objects.mapIndexed { idx, obj ->
+                SamObject(
+                    id = objects.getOrNull(idx)?.first ?: idx,
+                    polygon = if (obj.polygon.isNotEmpty()) {
+                        obj.polygon.mapNotNull { pair ->
+                            if (pair.size >= 2) pair[0] to pair[1] else null
+                        }.takeIf { it.isNotEmpty() }
+                    } else null,
+                    maskPngB64 = obj.maskPngB64.ifEmpty { null },
+                )
+            },
+        )
     }
 
     /**
