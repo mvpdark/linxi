@@ -44,12 +44,15 @@ compose.desktop {
             packageName = "Lingxi"
             // 版本号：优先从环境变量读取（CI 注入），本地默认 1.0.0
             packageVersion = System.getenv("LINGXI_VERSION_NAME") ?: "1.0.0"
-            description = "灵犀 AI 助手"
-            copyright = "© 2026 mvpdark. All rights reserved."
+            // 用英文描述 — WiX Toolset 处理中文字符时会出现 MalformedInputException: Input length = 1
+            description = "Lingxi AI Assistant"
+            copyright = "Copyright 2026 mvpdark. All rights reserved."
             vendor = "mvpdark"
 
             windows {
                 menuGroup = "Lingxi"
+                // upgradeUuid 是 MSI 安装包的必需字段 — 用于版本升级标识
+                upgradeUuid = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
                 // 暂时不设置自定义图标 — jpackage 对 ICO 格式要求严格，
                 // 当前 ICO 文件导致 "Input length = 1" 错误，先用默认图标让 MSI 打包成功
                 // iconFile.set(project.layout.projectDirectory.file("resources/windows/lingxi.ico"))
