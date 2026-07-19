@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "灵犀",
+  "productName": "Lingxi",
   "version": "1.0.0",
   "identifier": "com.mvpdark.lingxi",
   "build": {
@@ -49,7 +49,7 @@
         "type": "embedBootstrapper"
       }
     },
-    "shortDescription": "灵犀 - AI 室内设计助手",
-    "longDescription": "灵犀：AI 驱动的室内设计助手，支持对话式方案生成、图片编辑与全景预览。"
+    "shortDescription": "Lingxi - AI Interior Design Assistant",
+    "longDescription": "Lingxi: AI-powered interior design assistant with conversational plan generation, image editing, and panorama preview."
   }
 }
