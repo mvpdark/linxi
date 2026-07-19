@@ -12,9 +12,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import top.mvpdark.lingxi.ui.theme.GoldBright
+import top.mvpdark.lingxi.ui.theme.GoldDeep
+import top.mvpdark.lingxi.ui.theme.LingxiThemeStyle
+import top.mvpdark.lingxi.ui.theme.LocalThemeStyle
 
 /**
- * 占位页面，用于尚未实现的功能模块。
+ * 占位页面（Noir Aurum 黑曜鎏金风格），用于尚未实现的功能模块。
+ *
+ * Noir Aurum 模式下文字使用高光金（GoldBright），副标题使用暗金（GoldDeep）。
  *
  * @param title 标题。
  * @param subtitle 副标题/说明。
@@ -24,6 +30,8 @@ fun PlaceholderScreen(
     title: String,
     subtitle: String = "",
 ) {
+    val isNoirAurum = LocalThemeStyle.current == LingxiThemeStyle.NOIR_AURUM
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -34,14 +42,16 @@ fun PlaceholderScreen(
         Text(
             text = title,
             style = MaterialTheme.typography.headlineMedium,
-            fontWeight = FontWeight.SemiBold,
-            color = MaterialTheme.colorScheme.primary,
+            fontWeight = if (isNoirAurum) FontWeight.Light else FontWeight.SemiBold,
+            // Noir Aurum：文字色用高光金 GoldBright（即 ChampagneBright #E8C97A）
+            color = if (isNoirAurum) GoldBright else MaterialTheme.colorScheme.primary,
         )
         if (subtitle.isNotBlank()) {
             Text(
                 text = subtitle,
                 style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                // Noir Aurum：副标题用暗金 GoldDeep（即 ChampagneDeep #9A7B2E）
+                color = if (isNoirAurum) GoldDeep else MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,
                 modifier = Modifier.padding(top = 12.dp),
             )

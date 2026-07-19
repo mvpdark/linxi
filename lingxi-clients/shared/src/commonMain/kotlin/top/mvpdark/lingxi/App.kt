@@ -12,7 +12,7 @@ import top.mvpdark.lingxi.ui.update.UpdateCheckHost
 /**
  * 应用根组件。
  *
- * - 用 [LingxiTheme] 包裹
+ * - 用 [LingxiTheme] 包裹（Noir Aurum 黑曜鎏金风格，默认强制深色）
  * - Koin 初始化检查（确保 Koin 已启动）
  * - 渲染 [NavGraph]
  * - Android 平台：启动时自动检查 GitHub Releases 新版本

@@ -2,6 +2,7 @@ package top.mvpdark.lingxi.ui.screens
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -24,6 +25,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -44,6 +46,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -67,13 +70,25 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import kotlin.math.roundToInt
 import org.koin.compose.viewmodel.koinViewModel
+import top.mvpdark.lingxi.core.util.EncodeUtils
 import top.mvpdark.lingxi.core.util.formatMessageTime
 import top.mvpdark.lingxi.core.util.formatSessionTime
 import top.mvpdark.lingxi.data.model.ChatMessage
 import top.mvpdark.lingxi.ui.chat.ChatViewModel
 import top.mvpdark.lingxi.ui.components.ChatBubble
+import top.mvpdark.lingxi.ui.components.FullScreenImagePreview
+import top.mvpdark.lingxi.ui.components.UploadThumbnail
 import top.mvpdark.lingxi.ui.emoji.AnimatedEmoji
 import top.mvpdark.lingxi.ui.emoji.EmojiState
+import top.mvpdark.lingxi.ui.imageedit.rememberImagePickerLauncher
+import top.mvpdark.lingxi.ui.theme.Champagne
+import top.mvpdark.lingxi.ui.theme.ChampagneBright
+import top.mvpdark.lingxi.ui.theme.ChampagneDeep
+import top.mvpdark.lingxi.ui.theme.GoldDivider
+import top.mvpdark.lingxi.ui.theme.LingxiThemeStyle
+import top.mvpdark.lingxi.ui.theme.LocalThemeStyle
+import top.mvpdark.lingxi.ui.theme.Obsidian
+import top.mvpdark.lingxi.ui.theme.ObsidianSurface
 
 /**
  * 聊天页面（核心页面）。
@@ -95,6 +110,18 @@ fun ChatScreen(
 ) {
     val state by chatViewModel.uiState.collectAsState()
     val listState = rememberLazyListState()
+    val isNoirAurum = LocalThemeStyle.current == LingxiThemeStyle.NOIR_AURUM
+
+    // 待发送图片（本地字节流）+ 全屏预览开关
+    var pickedImageBytes by remember { mutableStateOf<ByteArray?>(null) }
+    var showImagePreview by remember { mutableStateOf(false) }
+
+    // 跨平台图片选择器：选好图片后回调字节流
+    val launchImagePicker = rememberImagePickerLauncher { bytes ->
+        if (bytes != null) {
+            pickedImageBytes = bytes
+        }
+    }
 
     // 进入时选中会话并加载历史消息
     LaunchedEffect(sessionId) {
@@ -111,30 +138,41 @@ fun ChatScreen(
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = {
-                    Column {
-                        Text(
-                            text = "团团",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.SemiBold,
-                        )
-                        Text(
-                            text = if (state.isSending) "正在回复..." else "猫娘 AI 助手",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                },
-                navigationIcon = {
-                    IconButton(onClick = chatViewModel::toggleSessionsPanel) {
-                        Icon(Icons.Default.Menu, contentDescription = "会话列表")
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = Color.Transparent,
-                ),
-            )
+            Column {
+                TopAppBar(
+                    title = {
+                        Column {
+                            Text(
+                                text = "团团",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = if (isNoirAurum) FontWeight.ExtraLight else FontWeight.SemiBold,
+                                color = if (isNoirAurum) ChampagneBright else MaterialTheme.colorScheme.onSurface,
+                            )
+                            Text(
+                                text = if (state.isSending) "正在回复..." else "猫娘 AI 助手",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = if (isNoirAurum) ChampagneDeep else MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    },
+                    navigationIcon = {
+                        IconButton(onClick = chatViewModel::toggleSessionsPanel) {
+                            Icon(
+                                Icons.Default.Menu,
+                                contentDescription = "会话列表",
+                                tint = if (isNoirAurum) Champagne else MaterialTheme.colorScheme.onSurface,
+                            )
+                        }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = Color.Transparent,
+                    ),
+                )
+                // Noir Aurum：顶栏底部金色分割线
+                if (isNoirAurum) {
+                    HorizontalDivider(color = GoldDivider, thickness = 1.dp)
+                }
+            }
         },
     ) { paddingValues ->
         Box(modifier = Modifier
@@ -222,16 +260,41 @@ fun ChatScreen(
                         }
                     }
 
-                    HorizontalDivider()
+                    HorizontalDivider(
+                        color = if (isNoirAurum) GoldDivider else MaterialTheme.colorScheme.outlineVariant,
+                        thickness = 1.dp,
+                    )
 
                     // 底部输入栏
                     ChatInputBar(
                         text = state.inputText,
                         onTextChange = chatViewModel::onInputTextChange,
-                        onSend = { chatViewModel.sendMessage() },
+                        onSend = {
+                            val bytes = pickedImageBytes
+                            if (bytes != null) {
+                                chatViewModel.sendMessage(
+                                    imageUrl = EncodeUtils.bytesToDataUrl(bytes),
+                                )
+                                pickedImageBytes = null
+                            } else {
+                                chatViewModel.sendMessage()
+                            }
+                        },
                         isSending = state.isSending,
+                        pickedImageBytes = pickedImageBytes,
+                        onPickImage = launchImagePicker,
+                        onPreviewImage = { showImagePreview = true },
+                        onRemoveImage = { pickedImageBytes = null },
                     )
                 }
+            }
+
+            // 全屏图片预览覆盖层（覆盖整个聊天页，无黑边）
+            if (showImagePreview && pickedImageBytes != null) {
+                FullScreenImagePreview(
+                    model = pickedImageBytes,
+                    onDismiss = { showImagePreview = false },
+                )
             }
         }
     }
@@ -506,12 +569,22 @@ private fun AgentStatusCard(
     events: List<top.mvpdark.lingxi.data.model.AgentEvent>,
     emojiState: EmojiState = EmojiState.THINKING,
 ) {
+    val isNoirAurum = LocalThemeStyle.current == LingxiThemeStyle.NOIR_AURUM
+    val cardShape = RoundedCornerShape(16.dp)
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .then(
+                if (isNoirAurum) {
+                    Modifier.border(width = 1.dp, color = Champagne.copy(alpha = 0.2f), shape = cardShape)
+                } else {
+                    Modifier
+                }
+            ),
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant,
+            containerColor = if (isNoirAurum) ObsidianSurface else MaterialTheme.colorScheme.surfaceVariant,
         ),
-        shape = RoundedCornerShape(16.dp),
+        shape = cardShape,
     ) {
         Row(
             modifier = Modifier.padding(12.dp),
@@ -528,12 +601,13 @@ private fun AgentStatusCard(
                     text = status,
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.Medium,
+                    color = if (isNoirAurum) ChampagneBright else MaterialTheme.colorScheme.onSurface,
                 )
                 if (events.isNotEmpty()) {
                     Text(
                         text = "Agent: ${events.joinToString { it.agentName }}",
                         style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = if (isNoirAurum) ChampagneDeep else MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
             }
@@ -599,6 +673,7 @@ private fun TypingIndicator() {
  */
 @Composable
 private fun EmptyChatHint() {
+    val isNoirAurum = LocalThemeStyle.current == LingxiThemeStyle.NOIR_AURUM
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -612,9 +687,15 @@ private fun EmptyChatHint() {
         )
         Spacer(Modifier.height(12.dp))
         Text(
-            text = "喵～团团在这里！\n有什么设计灵感想聊聊吗？",
+            text = "喵～团团在这里！",
             style = MaterialTheme.typography.bodyLarge,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = if (isNoirAurum) ChampagneBright else MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(4.dp))
+        Text(
+            text = "有什么设计灵感想聊聊吗？",
+            style = MaterialTheme.typography.bodyMedium,
+            color = if (isNoirAurum) ChampagneDeep else MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
 }
@@ -622,10 +703,18 @@ private fun EmptyChatHint() {
 /**
  * 底部输入栏。
  *
+ * - 已选图片缩略图显示在输入栏左上角（TRAE 风格，无文件名）
+ * - 图片选择按钮接入跨平台图片选择器
+ * - 支持仅图片或图文混合发送
+ *
  * @param text 输入文本。
  * @param onTextChange 文本变化回调。
  * @param onSend 发送回调。
  * @param isSending 是否正在发送（禁用按钮 + 显示 loading）。
+ * @param pickedImageBytes 已选择的图片字节流（null 表示未选）。
+ * @param onPickImage 点击图片按钮启动选择器。
+ * @param onPreviewImage 点击缩略图打开全屏预览。
+ * @param onRemoveImage 点击缩略图删除按钮清除已选图片。
  */
 @Composable
 private fun ChatInputBar(
@@ -633,52 +722,120 @@ private fun ChatInputBar(
     onTextChange: (String) -> Unit,
     onSend: () -> Unit,
     isSending: Boolean,
+    pickedImageBytes: ByteArray?,
+    onPickImage: () -> Unit,
+    onPreviewImage: () -> Unit,
+    onRemoveImage: () -> Unit,
 ) {
-    Row(
+    val isNoirAurum = LocalThemeStyle.current == LingxiThemeStyle.NOIR_AURUM
+    val sendEnabled = !isSending && (text.isNotBlank() || pickedImageBytes != null)
+
+    Column(
         modifier = Modifier
             .fillMaxWidth()
             .imePadding()
             .padding(horizontal = 12.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
     ) {
-        // 图片上传按钮（暂用图标占位）
-        IconButton(onClick = { /* TODO: 接入图片选择器 */ }) {
-            Icon(
-                imageVector = Icons.Default.Image,
-                contentDescription = "上传图片",
-                tint = MaterialTheme.colorScheme.primary,
+        // 已选图片缩略图（左上角，TRAE 风格：36×36 / 6dp 圆角 / 无文件名）
+        if (pickedImageBytes != null) {
+            UploadThumbnail(
+                model = pickedImageBytes,
+                onPreview = onPreviewImage,
+                onDelete = onRemoveImage,
+                modifier = Modifier.padding(bottom = 8.dp),
             )
         }
 
-        OutlinedTextField(
-            value = text,
-            onValueChange = onTextChange,
-            modifier = Modifier
-                .weight(1f)
-                .heightIn(min = 56.dp),
-            placeholder = { Text("给团团说点什么...") },
-            maxLines = 5,
-            shape = RoundedCornerShape(24.dp),
-            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-            trailingIcon = {
-                IconButton(
-                    onClick = onSend,
-                    enabled = !isSending && text.isNotBlank(),
-                ) {
-                    if (isSending) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(20.dp),
-                            strokeWidth = 2.dp,
-                        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            // 图片选择按钮（接入跨平台图片选择器）
+            IconButton(onClick = onPickImage) {
+                Icon(
+                    imageVector = Icons.Default.Image,
+                    contentDescription = "上传图片",
+                    tint = if (isNoirAurum) Champagne else MaterialTheme.colorScheme.primary,
+                )
+            }
+
+            OutlinedTextField(
+                value = text,
+                onValueChange = onTextChange,
+                modifier = Modifier
+                    .weight(1f)
+                    .heightIn(min = 56.dp),
+                placeholder = {
+                    Text(
+                        text = "给团团说点什么...",
+                        color = if (isNoirAurum) ChampagneDeep.copy(alpha = 0.5f) else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                },
+                maxLines = 5,
+                shape = RoundedCornerShape(28.dp),
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                colors = if (isNoirAurum) {
+                    OutlinedTextFieldDefaults.colors(
+                        focusedContainerColor = ObsidianSurface,
+                        unfocusedContainerColor = ObsidianSurface,
+                        focusedTextColor = ChampagneBright,
+                        unfocusedTextColor = ChampagneBright,
+                        focusedBorderColor = Champagne,
+                        unfocusedBorderColor = Champagne.copy(alpha = 0.3f),
+                        cursorColor = Champagne,
+                        focusedLabelColor = ChampagneBright,
+                        unfocusedLabelColor = ChampagneDeep,
+                    )
+                } else {
+                    OutlinedTextFieldDefaults.colors()
+                },
+                trailingIcon = {
+                    if (isNoirAurum) {
+                        // Noir Aurum：圆形金色发送按钮 + 黑色图标
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(CircleShape)
+                                .background(if (sendEnabled) Champagne else Champagne.copy(alpha = 0.3f))
+                                .clickable(enabled = sendEnabled, onClick = onSend),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            if (isSending) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(18.dp),
+                                    color = Obsidian,
+                                    strokeWidth = 2.dp,
+                                )
+                            } else {
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Filled.Send,
+                                    contentDescription = "发送",
+                                    tint = Obsidian,
+                                    modifier = Modifier.size(18.dp),
+                                )
+                            }
+                        }
                     } else {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.Send,
-                            contentDescription = "发送",
-                            tint = MaterialTheme.colorScheme.primary,
-                        )
+                        IconButton(
+                            onClick = onSend,
+                            enabled = sendEnabled,
+                        ) {
+                            if (isSending) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(20.dp),
+                                    strokeWidth = 2.dp,
+                                )
+                            } else {
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Filled.Send,
+                                    contentDescription = "发送",
+                                    tint = MaterialTheme.colorScheme.primary,
+                                )
+                            }
+                        }
                     }
-                }
-            },
-        )
+                },
+            )
+        }
     }
 }

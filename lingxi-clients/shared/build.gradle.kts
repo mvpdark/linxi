@@ -23,6 +23,11 @@ kotlin {
         }
     }
 
+    // iOS targets
+    val iosArm64Target = iosArm64()
+    val iosX64Target = iosX64()
+    val iosSimulatorArm64Target = iosSimulatorArm64()
+
     sourceSets {
         commonMain.dependencies {
             // Compose Multiplatform
@@ -82,10 +87,24 @@ kotlin {
             }
         }
 
+        val iosMain by getting {
+            dependencies {
+                implementation(libs.ktor.client.darwin)
+            }
+        }
+
         commonTest {
             dependencies {
                 implementation(libs.kotlin.test)
             }
+        }
+    }
+
+    // iOS framework: exported as "ComposeApp" for Xcode integration
+    listOf(iosArm64Target, iosX64Target, iosSimulatorArm64Target).forEach { target ->
+        target.binaries.framework {
+            baseName = "ComposeApp"
+            isStatic = true
         }
     }
 

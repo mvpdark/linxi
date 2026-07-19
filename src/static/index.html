@@ -11,6 +11,23 @@
   <link rel="icon" type="image/svg+xml" href="favicon.svg">
   <link rel="stylesheet" href="css/style.css?v=20260718e4">
   <link rel="stylesheet" href="css/auth.css?v=20260718e4">
+  <!-- Aurum Noir 黑金奢华主题（通过 .theme-aurum-noir class on <html> 激活） -->
+  <link rel="stylesheet" href="css/aurum-noir.css?v=20260719a1">
+  <!-- Aurum Noir 主题字体（在线加载，离线回退到系统 serif） -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@300;400;500&family=Inter:wght@300;400;500&family=JetBrains+Mono:wght@300;400&display=swap" rel="stylesheet">
+  <script>
+    // 提前应用主题，避免页面加载闪烁（FOUC）
+    try {
+      var saved = localStorage.getItem('aurum-noir-theme');
+      if (saved === null || saved === '1') {
+        document.documentElement.classList.add('theme-aurum-noir');
+      }
+    } catch (e) {
+      document.documentElement.classList.add('theme-aurum-noir');
+    }
+  </script>
   <!-- Vue 3（本地 vendor） -->
   <script src="vendor/vue.global.prod.js?v=20260718e4"></script>
   <!-- Konva (Canvas 交互，本地 vendor) -->
@@ -20,6 +37,13 @@
   <script src="vendor/pannellum.js?v=20260718e4"></script>
 </head>
 <body>
+  <!-- Aurum Noir 主题切换按钮（仅桌面端显示） -->
+  <button class="theme-toggle" id="theme-toggle" title="切换黑金主题" hidden>
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+      <circle cx="12" cy="12" r="4"/>
+      <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/>
+    </svg>
+  </button>
   <!-- 登录遮罩：auth.js 控制显示/隐藏（默认隐藏，由 auth.js 初始化时按需显示，避免登录态用户看到闪烁） -->
   <div id="auth-overlay" class="auth-overlay" hidden>
     <div class="auth-card">

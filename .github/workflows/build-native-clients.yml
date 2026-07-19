@@ -313,9 +313,59 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+  build-ios:
+    name: Build iOS Framework
+    runs-on: macos-latest
+    env:
+      LINGXI_VERSION_NAME: "1.0.${{ github.run_number }}"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      - name: Build iOS Framework (shared + iosApp)
+        run: |
+          # 编译 shared 模块的 iOS Arm64 release framework
+          ./gradlew :shared:linkReleaseFrameworkIosArm64
+          # 编译 iosApp 模块的 iOS Arm64 release framework
+          ./gradlew :iosApp:linkReleaseFrameworkIosArm64
+
+      - name: Prepare iOS framework artifact
+        run: |
+          mkdir -p release-assets
+          # 将 ComposeApp.framework 打包为 zip
+          cd shared/build/bin/iosArm64/releaseFramework
+          zip -ry "$GITHUB_WORKSPACE/lingxi-clients/release-assets/lingxi-ios-framework-v1.0.${{ github.run_number }}.zip" ComposeApp.framework
+          cd "$GITHUB_WORKSPACE/lingxi-clients"
+          echo "iOS framework zip:"
+          ls -la release-assets/
+
+      - name: Upload iOS Framework
+        uses: actions/upload-artifact@v4
+        with:
+          name: lingxi-ios-framework
+          path: lingxi-clients/release-assets/*.zip
+          if-no-files-found: error
+          retention-days: 30
+
   release:
     name: Publish to GitHub Releases
-    needs: [build-android, build-desktop, build-desktop-macos-arm64, build-desktop-macos-intel]
+    needs: [build-android, build-desktop, build-desktop-macos-arm64, build-desktop-macos-intel, build-ios]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
@@ -372,6 +422,7 @@ jobs:
           copy_asset "artifacts/lingxi-desktop-exe" "*.exe" "lingxi-desktop-portable-${VERSION}.exe" "Desktop EXE"
           copy_asset "artifacts/lingxi-desktop-dmg-arm64" "*.dmg" "lingxi-desktop-macos-arm64-${VERSION}.dmg" "macOS ARM64 DMG"
           copy_asset "artifacts/lingxi-desktop-dmg-x64" "*.dmg" "lingxi-desktop-macos-x64-${VERSION}.dmg" "macOS Intel DMG"
+          copy_asset "artifacts/lingxi-ios-framework" "*.zip" "lingxi-ios-framework-${VERSION}.zip" "iOS Framework"
 
           echo "=== Release assets ==="
           ls -la release-assets/
@@ -408,6 +459,7 @@ jobs:
           - **Windows 便携版**: 下载 \`lingxi-desktop-portable-v1.0.${{ github.run_number }}.exe\`，无需安装直接运行
           - **macOS Apple Silicon (M1/M2/M3/M4)**: 下载 \`lingxi-desktop-macos-arm64-v1.0.${{ github.run_number }}.dmg\`
           - **macOS Intel**: 下载 \`lingxi-desktop-macos-x64-v1.0.${{ github.run_number }}.dmg\`
+          - **iOS Framework**: 下载 \`lingxi-ios-framework-v1.0.${{ github.run_number }}.zip\`，解压后导入 Xcode 项目（P0 阶段为 framework，需手动创建 Xcode wrapper 工程）
 
           > 如已安装旧版本，可直接覆盖安装（签名一致）。
           > macOS 用户首次打开可能需要右键选择「打开」以绕过 Gatekeeper。" \

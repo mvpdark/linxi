@@ -50,6 +50,8 @@ compose.desktop {
 
             windows {
                 menuGroup = "Lingxi"
+                // 应用图标（Windows .ico）
+                iconFile.set(project.layout.projectDirectory.dir("resources/windows/lingxi.ico"))
                 // 捆绑 JRE，无需用户预装 Java
                 jvmArgs += listOf("-Xmx2g", "-Dfile.encoding=UTF-8")
             }
@@ -57,6 +59,8 @@ compose.desktop {
             macOS {
                 bundleID = "top.mvpdark.lingxi"
                 dockName = "灵犀"
+                // 应用图标（macOS .icns）
+                iconFile.set(project.layout.projectDirectory.dir("resources/macos/lingxi.icns"))
                 // 最低系统版本 11.0（Big Sur），同时支持 Intel 和 Apple Silicon
                 minimumSystemVersion = "11.0"
                 jvmArgs += listOf("-Xmx2g", "-Dfile.encoding=UTF-8")

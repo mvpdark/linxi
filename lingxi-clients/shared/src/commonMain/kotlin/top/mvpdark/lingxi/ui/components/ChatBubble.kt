@@ -1,6 +1,7 @@
 package top.mvpdark.lingxi.ui.components
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -16,6 +17,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
@@ -25,16 +27,26 @@ import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import top.mvpdark.lingxi.core.util.UrlResolver
 import top.mvpdark.lingxi.ui.theme.AiBubble
+import top.mvpdark.lingxi.ui.theme.Champagne
+import top.mvpdark.lingxi.ui.theme.ChampagneBright
+import top.mvpdark.lingxi.ui.theme.ChampagneDeep
+import top.mvpdark.lingxi.ui.theme.LingxiThemeStyle
 import top.mvpdark.lingxi.ui.theme.LocalDarkTheme
+import top.mvpdark.lingxi.ui.theme.LocalThemeStyle
+import top.mvpdark.lingxi.ui.theme.NoirAiBubble
+import top.mvpdark.lingxi.ui.theme.Obsidian
 import top.mvpdark.lingxi.ui.theme.userBubbleBrush
 
 /**
  * 聊天气泡组件。
  *
- * - AI 气泡：奶白色背景，20dp 圆角，左对齐
- * - 用户气泡：柔和绿色渐变背景，右对齐
- * - 支持文本和图片内容
- * - 显示时间戳
+ * 双风格支持：
+ * - NOIR_AURUM（黑曜鎏金）：
+ *   - AI 气泡：NoirAiBubble 深黑表面 + 1dp 金色描边（alpha 0.3）+ 20dp 圆角 + 2dp 极淡金阴影
+ *   - 用户气泡：userBubbleBrush 金色渐变 + 黑色文字 + 20dp 圆角（黑底金字 vs 金底黑字二元对比）
+ *   - 图片：16dp 圆角 + 1dp 金色描边
+ *   - 时间戳：ChampagneDeep.copy(alpha = 0.7f) 暗金
+ * - QUIET_MATERIALITY（沉静物性）：保持原有奶白/绿渐变逻辑
  *
  * @param text 消息文本。
  * @param isUser 是否为用户消息（false 表示 AI 消息）。
@@ -51,6 +63,8 @@ fun ChatBubble(
     modifier: Modifier = Modifier,
 ) {
     val isDark = LocalDarkTheme.current
+    val style = LocalThemeStyle.current
+    val isNoirAurum = style == LingxiThemeStyle.NOIR_AURUM
 
     Row(
         modifier = modifier.fillMaxWidth(),
@@ -60,23 +74,65 @@ fun ChatBubble(
             horizontalAlignment = if (isUser) Alignment.End else Alignment.Start,
             modifier = Modifier.widthIn(max = 320.dp),
         ) {
+            val bubbleShape = RoundedCornerShape(20.dp)
+
+            // 气泡背景画刷：Noir Aurum 用 NoirAiBubble / userBubbleBrush；Quiet Materiality 保持原逻辑
+            val bubbleBrush: Brush = when {
+                isNoirAurum && isUser -> userBubbleBrush(isDark)
+                isNoirAurum && !isUser -> SolidColor(NoirAiBubble)
+                isUser -> userBubbleBrush(isDark)
+                else -> SolidColor(if (isDark) Color(0xFF2E2E2C) else AiBubble)
+            }
+
+            // AI 气泡阴影：Noir Aurum 用 2dp 金色阴影（漆器浮起感），Quiet Materiality 用 1dp 普通阴影
+            val bubbleShadowElevation = when {
+                !isUser && isNoirAurum -> 2.dp
+                !isUser -> 1.dp
+                else -> 0.dp
+            }
+
+            // 文字颜色：Noir Aurum 用金/黑二元（黑底金字 vs 金底黑字），Quiet Materiality 用白/onSurface
+            val textColor: Color = when {
+                isNoirAurum && isUser -> Obsidian
+                isNoirAurum && !isUser -> ChampagneBright
+                isUser -> Color.White
+                else -> MaterialTheme.colorScheme.onSurface
+            }
+
+            // Noir Aurum AI 气泡：1dp 金色描边（alpha 0.3，莳绘浮起感）
+            val goldBorderModifier = if (isNoirAurum && !isUser) {
+                Modifier.border(width = 1.dp, color = Champagne.copy(alpha = 0.3f), shape = bubbleShape)
+            } else {
+                Modifier
+            }
+
             Box(
                 modifier = Modifier
-                    .clip(RoundedCornerShape(20.dp))
-                    .background(
-                        brush = if (isUser) {
-                            userBubbleBrush(isDark)
+                    .then(if (bubbleShadowElevation > 0.dp) {
+                        if (isNoirAurum && !isUser) {
+                            // Noir Aurum AI 气泡：金色阴影（漆器莳绘浮起的光泽）
+                            Modifier.shadow(
+                                elevation = 2.dp,
+                                shape = bubbleShape,
+                                ambientColor = Champagne.copy(alpha = 0.1f),
+                                spotColor = Champagne.copy(alpha = 0.15f),
+                            )
                         } else {
-                            SolidColor(if (isDark) Color(0xFF2E2E2C) else AiBubble)
+                            Modifier.shadow(elevation = bubbleShadowElevation, shape = bubbleShape)
                         }
-                    )
+                    } else {
+                        Modifier
+                    })
+                    .then(goldBorderModifier)
+                    .clip(bubbleShape)
+                    .background(brush = bubbleBrush)
                     .padding(horizontal = 14.dp, vertical = 10.dp),
             ) {
                 if (text.isNotBlank()) {
                     Text(
                         text = text,
                         style = MaterialTheme.typography.bodyLarge,
-                        color = if (isUser) Color.White else MaterialTheme.colorScheme.onSurface,
+                        color = textColor,
                         overflow = TextOverflow.Visible,
                     )
                 }
@@ -88,6 +144,7 @@ fun ChatBubble(
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                     modifier = Modifier.padding(top = 6.dp),
                 ) {
+                    val imageShape = RoundedCornerShape(16.dp)
                     images.forEach { imageUrl ->
                         AsyncImage(
                             model = UrlResolver.resolveImageUrl(imageUrl),
@@ -95,18 +152,26 @@ fun ChatBubble(
                             contentScale = ContentScale.FillWidth,
                             modifier = Modifier
                                 .sizeIn(maxWidth = 240.dp, maxHeight = 320.dp)
-                                .clip(RoundedCornerShape(16.dp)),
+                                .then(
+                                    if (isNoirAurum) {
+                                        Modifier.border(width = 1.dp, color = Champagne.copy(alpha = 0.3f), shape = imageShape)
+                                    } else {
+                                        Modifier
+                                    }
+                                )
+                                .clip(imageShape),
                         )
                     }
                 }
             }
 
-            // 时间戳
+            // 时间戳：Noir Aurum 用 ChampagneDeep.copy(alpha = 0.7f) 暗金，Quiet Materiality 用 onSurfaceVariant
             if (timestamp.isNotBlank()) {
+                val timestampColor = if (isNoirAurum) ChampagneDeep.copy(alpha = 0.7f) else MaterialTheme.colorScheme.onSurfaceVariant
                 Text(
                     text = timestamp,
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = timestampColor,
                     modifier = Modifier.padding(top = 4.dp, end = 4.dp, start = 4.dp),
                 )
             }

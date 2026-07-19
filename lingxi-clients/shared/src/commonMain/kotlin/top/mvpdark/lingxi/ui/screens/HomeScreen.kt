@@ -1,6 +1,7 @@
 package top.mvpdark.lingxi.ui.screens
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -50,16 +51,23 @@ import top.mvpdark.lingxi.core.util.formatDouble
 import top.mvpdark.lingxi.core.util.formatSessionTime
 import top.mvpdark.lingxi.ui.auth.AuthViewModel
 import top.mvpdark.lingxi.ui.chat.ChatViewModel
+import top.mvpdark.lingxi.ui.theme.ChampagneGold
+import top.mvpdark.lingxi.ui.theme.GoldBright
+import top.mvpdark.lingxi.ui.theme.GoldDeep
+import top.mvpdark.lingxi.ui.theme.LingxiThemeStyle
+import top.mvpdark.lingxi.ui.theme.LocalThemeStyle
+import top.mvpdark.lingxi.ui.theme.ObsidianSurface
+import top.mvpdark.lingxi.ui.theme.ObsidianSurfaceVariant
 
 /**
- * 首页。
+ * 首页（Noir Aurum 黑曜鎏金风格）。
  *
- * 设计哲学："Quiet Materiality"（沉静的物性）
- * - 暖奶油色背景承载鼠尾草绿强调色
- * - 2×2 功能卡片网格：深绿图标背景 + 白色图标
- * - 最近会话列表：浅灰卡片 + 友好时间格式
+ * 设计哲学："Noir Aurum"（黑曜鎏金）——曜石黑为基底，香槟金为唯一光源语言。
+ * - 曜石黑背景承载香槟金强调色，黑大于金十倍
+ * - 2×2 功能卡片网格：ObsidianSurface 底 + 香槟金描边（alpha 0.2）+ 淡金图标底
+ * - 最近会话列表：ObsidianSurfaceVariant 卡片 + 极细金边
  *
- * - 顶部导航栏：用户名 + 余额 + 退出按钮（融入背景，无分隔线）
+ * - 顶部导航栏：用户名（GoldBright Light）+ 余额（GoldDeep）+ 退出按钮（融入背景，无分隔线）
  * - 功能卡片网格：灵感(→chat) / 改图(→image-edit) / 全景(→panorama) / 更多
  * - 最近会话列表（前5条）
  *
@@ -82,6 +90,7 @@ fun HomeScreen(
 ) {
     val authState by authViewModel.uiState.collectAsState()
     val chatState by chatViewModel.uiState.collectAsState()
+    val isNoirAurum = LocalThemeStyle.current == LingxiThemeStyle.NOIR_AURUM
 
     // 进入首页刷新会话列表与用户信息
     LaunchedEffect(Unit) {
@@ -95,16 +104,19 @@ fun HomeScreen(
             TopAppBar(
                 title = {
                     Column {
+                        // Noir Aurum：标题用高光金 GoldBright，Light 字重
                         Text(
                             text = authState.user?.username ?: "灵犀",
                             style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.SemiBold,
+                            fontWeight = if (isNoirAurum) FontWeight.Light else FontWeight.SemiBold,
+                            color = if (isNoirAurum) GoldBright else MaterialTheme.colorScheme.onSurface,
                         )
                         val balance = authState.user?.balance ?: 0.0
+                        // Noir Aurum：余额用暗金 GoldDeep
                         Text(
                             text = "余额 ¥${formatDouble(balance)}",
                             style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            color = if (isNoirAurum) GoldDeep else MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
                 },
@@ -116,7 +128,7 @@ fun HomeScreen(
                         Icon(
                             Icons.AutoMirrored.Filled.Logout,
                             contentDescription = "退出登录",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            tint = if (isNoirAurum) GoldDeep else MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
                 },
@@ -139,7 +151,8 @@ fun HomeScreen(
                 Text(
                     text = "功能",
                     style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
+                    fontWeight = if (isNoirAurum) FontWeight.ExtraLight else FontWeight.SemiBold,
+                    color = if (isNoirAurum) GoldBright else MaterialTheme.colorScheme.onSurface,
                 )
             }
             item {
@@ -200,7 +213,8 @@ fun HomeScreen(
                     Text(
                         text = "最近会话",
                         style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold,
+                        fontWeight = if (isNoirAurum) FontWeight.ExtraLight else FontWeight.SemiBold,
+                        color = if (isNoirAurum) GoldBright else MaterialTheme.colorScheme.onSurface,
                     )
                 }
             }
@@ -211,7 +225,11 @@ fun HomeScreen(
                     Text(
                         text = "还没有会话，点击「灵感」开始第一次对话吧～",
                         style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = if (isNoirAurum) {
+                            GoldDeep.copy(alpha = 0.7f)
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
                         modifier = Modifier.padding(vertical = 8.dp),
                     )
                 }
@@ -229,13 +247,13 @@ fun HomeScreen(
 }
 
 /**
- * 功能卡片。
+ * 功能卡片（Noir Aurum 黑曜鎏金风格）。
  *
  * 设计规范：
- * - primaryContainer 背景（浅薄荷绿 #D4E5D4）
+ * - ObsidianSurface 背景 + 1dp 香槟金描边（alpha 0.2）
  * - 20dp 大圆角
- * - 柔和阴影（1dp）
- * - 图标：深绿色（primary）圆角方形背景 + 白色图标
+ * - 图标：淡金底（ChampagneGold alpha 0.15）+ 高光金图标（GoldBright）
+ * - 标题 GoldBright ExtraLight，描述 GoldDeep
  * - 禁用态：降低透明度
  *
  * @param enabled 是否启用。false 时降低视觉权重（用于"更多"等未上线功能）。
@@ -248,16 +266,33 @@ private fun FeatureCard(
     onClick: () -> Unit,
     enabled: Boolean = true,
 ) {
+    val isNoirAurum = LocalThemeStyle.current == LingxiThemeStyle.NOIR_AURUM
+    val cardShape = RoundedCornerShape(20.dp)
     Card(
         modifier = Modifier
             .height(120.dp)
-            .clickable(enabled = enabled, onClick = onClick),
+            .clickable(enabled = enabled, onClick = onClick)
+            .then(
+                if (isNoirAurum) {
+                    Modifier.border(
+                        width = 1.dp,
+                        color = ChampagneGold.copy(alpha = 0.2f),
+                        shape = cardShape,
+                    )
+                } else {
+                    Modifier
+                }
+            ),
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.primaryContainer,
+            containerColor = if (isNoirAurum) {
+                ObsidianSurface
+            } else {
+                MaterialTheme.colorScheme.primaryContainer
+            },
         ),
-        shape = RoundedCornerShape(20.dp),
+        shape = cardShape,
         elevation = CardDefaults.cardElevation(
-            defaultElevation = if (enabled) 1.dp else 0.dp,
+            defaultElevation = if (enabled && !isNoirAurum) 1.dp else 0.dp,
         ),
     ) {
         Column(
@@ -267,31 +302,41 @@ private fun FeatureCard(
                 .alpha(if (enabled) 1f else 0.5f),
             verticalArrangement = Arrangement.SpaceBetween,
         ) {
-            // 图标：深绿色圆角方形背景 + 白色图标
+            // 图标：Noir Aurum 用淡金底（alpha 0.15）+ 高光金图标；Quiet Materiality 用深绿底 + 白图标
             Box(
                 modifier = Modifier
                     .size(40.dp)
                     .clip(RoundedCornerShape(12.dp))
-                    .background(MaterialTheme.colorScheme.primary),
+                    .background(
+                        if (isNoirAurum) {
+                            ChampagneGold.copy(alpha = 0.15f)
+                        } else {
+                            MaterialTheme.colorScheme.primary
+                        }
+                    ),
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(
                     imageVector = icon,
                     contentDescription = title,
-                    tint = Color.White,
+                    tint = if (isNoirAurum) GoldBright else Color.White,
                 )
             }
             Column {
                 Text(
                     text = title,
                     style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                    fontWeight = if (isNoirAurum) FontWeight.ExtraLight else FontWeight.SemiBold,
+                    color = if (isNoirAurum) GoldBright else MaterialTheme.colorScheme.onPrimaryContainer,
                 )
                 Text(
                     text = subtitle,
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f),
+                    color = if (isNoirAurum) {
+                        GoldDeep
+                    } else {
+                        MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
+                    },
                 )
             }
         }
@@ -299,12 +344,12 @@ private fun FeatureCard(
 }
 
 /**
- * 会话列表项。
+ * 会话列表项（Noir Aurum 黑曜鎏金风格）。
  *
  * 设计规范：
- * - surfaceVariant 背景（浅米灰）
+ * - ObsidianSurfaceVariant 背景 + 1dp 香槟金描边（alpha 0.2）
  * - 14dp 圆角
- * - 标题 + 友好时间格式
+ * - 标题 GoldBright Light + 友好时间格式 GoldDeep
  */
 @Composable
 private fun SessionRowItem(
@@ -312,27 +357,45 @@ private fun SessionRowItem(
     subtitle: String,
     onClick: () -> Unit,
 ) {
+    val isNoirAurum = LocalThemeStyle.current == LingxiThemeStyle.NOIR_AURUM
+    val cardShape = RoundedCornerShape(14.dp)
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick),
+            .clickable(onClick = onClick)
+            .then(
+                if (isNoirAurum) {
+                    Modifier.border(
+                        width = 1.dp,
+                        color = ChampagneGold.copy(alpha = 0.2f),
+                        shape = cardShape,
+                    )
+                } else {
+                    Modifier
+                }
+            ),
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant,
+            containerColor = if (isNoirAurum) {
+                ObsidianSurfaceVariant
+            } else {
+                MaterialTheme.colorScheme.surfaceVariant
+            },
         ),
-        shape = RoundedCornerShape(14.dp),
+        shape = cardShape,
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
     ) {
         Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
             Text(
                 text = title,
                 style = MaterialTheme.typography.bodyLarge,
-                fontWeight = FontWeight.Medium,
+                fontWeight = if (isNoirAurum) FontWeight.Light else FontWeight.Medium,
+                color = if (isNoirAurum) GoldBright else MaterialTheme.colorScheme.onSurface,
             )
             if (subtitle.isNotBlank()) {
                 Text(
                     text = subtitle,
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = if (isNoirAurum) GoldDeep else MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         }

@@ -299,6 +299,36 @@ const app = createApp({
 
     function onResize() {
       isDesktop.value = window.innerWidth >= 768;
+      // 仅桌面端显示主题切换按钮
+      const toggle = document.getElementById('theme-toggle');
+      if (toggle) {
+        toggle.hidden = !isDesktop.value;
+      }
+    }
+
+    /** 切换 Aurum Noir 黑金主题 */
+    function toggleAurumNoir() {
+      const root = document.documentElement;
+      const enabled = root.classList.toggle('theme-aurum-noir');
+      try { localStorage.setItem('aurum-noir-theme', enabled ? '1' : '0'); } catch (e) {}
+    }
+
+    /** 启动时恢复主题偏好（默认开启 Aurum Noir） */
+    function restoreAurumNoir() {
+      try {
+        const saved = localStorage.getItem('aurum-noir-theme');
+        // 默认开启（首次访问无记录时）
+        if (saved === null || saved === '1') {
+          document.documentElement.classList.add('theme-aurum-noir');
+        }
+      } catch (e) {
+        // localStorage 不可用时也默认开启
+        document.documentElement.classList.add('theme-aurum-noir');
+      }
+      const toggle = document.getElementById('theme-toggle');
+      if (toggle) {
+        toggle.addEventListener('click', toggleAurumNoir);
+      }
     }
 
     onMounted(() => {
@@ -306,6 +336,7 @@ const app = createApp({
       window.addEventListener('resize', onResize);
       document.addEventListener('click', onDocClick);
       onResize();
+      restoreAurumNoir();
       loadSessions();
       loadUserInfo();
       initUpdater();
