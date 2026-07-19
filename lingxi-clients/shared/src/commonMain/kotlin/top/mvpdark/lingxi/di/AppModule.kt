@@ -8,6 +8,7 @@ import org.koin.core.qualifier.named
 import org.koin.dsl.module
 import top.mvpdark.lingxi.core.network.ApiClient
 import top.mvpdark.lingxi.core.network.createEngine
+import top.mvpdark.lingxi.core.util.ImageSaver
 import top.mvpdark.lingxi.core.util.UrlResolver
 import top.mvpdark.lingxi.data.local.ImageCacheManager
 import top.mvpdark.lingxi.data.repository.AuthRepository
@@ -61,6 +62,9 @@ val appModule = module {
 
     // 本地消息与图片缓存管理器（依赖 LocalMessageStore，由 platformModule 提供）
     single { ImageCacheManager(get(named("imageHttpClient")), get()) }
+
+    // 跨平台图片保存工具（依赖 PlatformContext，由 platformModule 提供）
+    single { ImageSaver(get()) }
 
     // ViewModel
     viewModel { AuthViewModel(get()) }

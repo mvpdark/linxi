@@ -80,6 +80,9 @@ kotlin {
             // EXIF 旋转规范化：与 Coil AsyncImage 显示的图片保持坐标系一致，
             // 避免 SAM2 解码（BitmapFactory）未应用 EXIF 旋转导致坐标误差
             implementation("androidx.exifinterface:exifinterface:1.4.1")
+            // 全景查看器：WebViewAssetLoader 以 https 同源 URL 提供本地缓存文件，
+            // 绕开 file:// 下 XHR/Blob 在 Android WebView 的兼容性问题
+            implementation(libs.androidx.webkit)
         }
 
         val desktopMain by getting {
@@ -88,6 +91,28 @@ kotlin {
                 implementation(libs.coroutines.swing)
                 implementation(compose.desktop.currentOs)
                 implementation(libs.onnxruntime.jvm)
+
+                // JavaFX WebView：内嵌 360° 全景浏览器（替代 Desktop.browse 系统浏览器方案）。
+                // 平台分类器必须在配置期按构建机 OS/架构确定 —— 各平台 jar 内含不同的
+                // 原生库（Windows 的 jfxwebkit.dll、macOS 的 libjfxwebkit.dylib 等），
+                // 且与 compose.desktop.currentOs 一致，CI 在各平台 runner 上构建时
+                // 会自动解析到对应平台的构件。
+                val javafxVersion = "21.0.4"
+                val osName = System.getProperty("os.name").lowercase()
+                val osArch = System.getProperty("os.arch").lowercase()
+                val javafxPlatform = when {
+                    osName.contains("win") -> "win"
+                    osName.contains("mac") -> if (osArch == "aarch64") "mac-aarch64" else "mac"
+                    else -> "linux"
+                }
+                implementation("org.openjfx:javafx-base:$javafxVersion:$javafxPlatform")
+                implementation("org.openjfx:javafx-graphics:$javafxVersion:$javafxPlatform")
+                // WebEngine 静态初始化强依赖 javafx.scene.control.Control，
+                // 缺少 javafx-controls 会在运行时抛 NoClassDefFoundError，必须显式声明
+                implementation("org.openjfx:javafx-controls:$javafxVersion:$javafxPlatform")
+                implementation("org.openjfx:javafx-web:$javafxVersion:$javafxPlatform")
+                implementation("org.openjfx:javafx-media:$javafxVersion:$javafxPlatform")
+                implementation("org.openjfx:javafx-swing:$javafxVersion:$javafxPlatform")
             }
         }
 

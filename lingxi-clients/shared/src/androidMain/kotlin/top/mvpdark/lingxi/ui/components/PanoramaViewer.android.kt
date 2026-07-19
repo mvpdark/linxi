@@ -3,13 +3,20 @@ package top.mvpdark.lingxi.ui.components
 import android.annotation.SuppressLint
 import android.util.Log
 import android.webkit.ConsoleMessage
+import android.webkit.JavascriptInterface
 import android.webkit.WebChromeClient
+import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -23,24 +30,57 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.webkit.WebViewAssetLoader
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
 import lingxi_clients.shared.generated.resources.Res
 import java.io.File
+import java.io.FileInputStream
+
+/**
+ * JS 桥接对象，供 WebView 中的 panorama_viewer.html 调用以回传状态。
+ *
+ * 必须使用 @JavascriptInterface 注解，方法名在混淆时必须保留。
+ * 已在 proguard-rules.pro 中显式保留：
+ *   -keepattributes JavascriptInterface
+ *   -keepclassmembers class * { @android.webkit.JavascriptInterface <methods>; }
+ *   -keep class top.mvpdark.lingxi.ui.components.PanoramaJsBridge { *; }
+ */
+class PanoramaJsBridge(
+    private val onRendered: () -> Unit,
+    private val onError: (String) -> Unit,
+) {
+    @JavascriptInterface
+    fun log(msg: String) = Log.d("PanoramaJS", msg)
+
+    @JavascriptInterface
+    fun onPanoramaLoaded() = onRendered()
+
+    @JavascriptInterface
+    fun onPanoramaError(msg: String) = onError(msg)
+}
 
 /**
  * Android 全景查看器：用 WebView + Pannellum 实现 360° 球面投影。
  *
- * 核心策略（彻底修复白屏）：
+ * 核心策略（v1.0.77 后的彻底修复）：
  * 1. 把 pannellum.js、pannellum.css、panorama_viewer.html 写到应用缓存目录
- * 2. 把全景图转成 base64 写入 panorama_data.js（window.__panoramaBase64 = "..."）
- * 3. HTML 加载 panorama_data.js 后，JS 将 base64 转为 blob: URL（同源，XHR 可靠）
- * 4. 用 pannellum.viewer 加载 blob: URL，避免 file:// XHR responseType="blob" 返回 null 的问题
- *
- * 之前方案失败的原因：
- * - file:// + XHR responseType="blob" 在 Android WebView API 29+ 中返回 null
- * - 导致 Pannellum 的 FileReader.readAsBinaryString(null) 静默崩溃 → 白屏
- * - blob: URL 是同源的，XHR 可以可靠加载，彻底解决问题
+ * 2. 把全景图也原样写入同一缓存目录（panorama.{png|jpg|webp}，扩展名如实反映内容格式）
+ * 3. panorama_data.js 改为只写相对路径配置（window.__panoramaConfig = {"url":"panorama.png"}）
+ * 4. 用 androidx.webkit.WebViewAssetLoader 把缓存目录映射为 https://appassets.androidplatform.net/panorama/...
+ *    WebView 加载 https 同源 URL，Pannellum 内部 XHR 取图行为在所有 Android WebView 版本上一致，
+ *    彻底绕开 file:// + XHR responseType="blob" 在 API 29+ 返回 null 的问题。
+ *    注意：AssetLoader 对二进制资源必须传 encoding=null，仅文本（js/css/html）传 UTF-8，
+ *    否则 WebView 对图片字节流做文本规范化 → 解码失败 → 黑屏/loadError。
+ * 5. 去掉 base64 → blob URL 中间层，不再在 JS 层做 atob 解码（低端机 atob + Uint8Array
+ *    构造会瞬时把内存放大 4~5 倍导致 OOM 或 WebView 崩溃）。
+ * 6. 全屏按钮隐藏（showFullscreenCtrl: false）：Android WebView 未实现 onShowCustomView，
+ *    用户点击全屏按钮无反应甚至卡死。
+ * 7. JS 桥 + 看门狗：HTML 在 load/error/loadError 时回调 Kotlin，Kotlin 据此更新 UI 状态，
+ *    同时以 8 秒看门狗兜底，超时则显示「全景加载超时」。
+ * 8. WebGL 探测：HTML 入口处主动探测 canvas.getContext('webgl')，不支持时立即显示中文提示。
  */
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
@@ -52,14 +92,18 @@ actual fun PanoramaViewer(
 
     var htmlPath by remember { mutableStateOf<String?>(null) }
     var loadError by remember { mutableStateOf<String?>(null) }
+    // 0=未加载 1=加载中 2=渲染成功 -1=出错
+    var renderState by remember { mutableStateOf(0) }
 
     LaunchedEffect(imageUrl) {
         if (imageUrl.isEmpty()) {
             htmlPath = null
             loadError = null
+            renderState = 0
             return@LaunchedEffect
         }
         loadError = null
+        renderState = 0
         htmlPath = withContext(Dispatchers.IO) {
             try {
                 val dir = File(context.cacheDir, "panorama_${System.currentTimeMillis()}")
@@ -73,15 +117,21 @@ actual fun PanoramaViewer(
                 val cssBytes = Res.readBytes("files/panorama/pannellum.css")
                 File(dir, "pannellum.css").writeBytes(cssBytes)
 
-                // 3. 读取全景图字节并转 base64
-                val imageBytes = when {
+                // 3. 写入 index.html（纯模板，不再内含 base64）
+                val htmlTemplate = Res.readBytes("files/panorama/panorama_viewer.html").decodeToString()
+                File(dir, "index.html").writeText(htmlTemplate)
+
+                // 4. 全景图 → 写入本地文件（保留原始格式扩展名，避免 MIME 与内容不匹配）
+                //    data URL 声明的 MIME 可能是 png/jpeg/webp，必须如实保留；
+                //    旧代码无论格式一律命名为 panorama.jpg 并以 image/jpeg 提供，
+                //    部分 WebView 版本严格按 Content-Type 解码 → PNG 字节流解码失败 → Pannellum loadError。
+                val imageBytes: ByteArray = when {
                     imageUrl.startsWith("data:") -> {
                         val base64Data = imageUrl.substringAfter("base64,")
                         android.util.Base64.decode(base64Data, android.util.Base64.DEFAULT)
                     }
                     imageUrl.startsWith("file://") -> {
-                        val srcPath = imageUrl.removePrefix("file://")
-                        File(srcPath).readBytes()
+                        File(imageUrl.removePrefix("file://")).readBytes()
                     }
                     imageUrl.startsWith("http://") || imageUrl.startsWith("https://") -> {
                         val url = java.net.URL(imageUrl)
@@ -100,23 +150,85 @@ actual fun PanoramaViewer(
                         }
                     }
                 }
+                val ext = when {
+                    imageUrl.startsWith("data:image/png") -> "png"
+                    imageUrl.startsWith("data:image/webp") -> "webp"
+                    imageUrl.startsWith("data:") -> "jpg"
+                    else -> {
+                        // 去掉 query/fragment 再取扩展名；非法扩展名回退 jpg
+                        val pathOnly = imageUrl.substringBefore('?').substringBefore('#')
+                        val candidate = pathOnly.substringAfterLast('.', "").lowercase()
+                        if (candidate in listOf("jpg", "jpeg", "png", "webp")) candidate else "jpg"
+                    }
+                }
+                val imageFileName = "panorama.$ext"
+                File(dir, imageFileName).writeBytes(imageBytes)
 
-                // 4. 写入 panorama_data.js（base64 数据）
-                val base64Str = android.util.Base64.encodeToString(imageBytes, android.util.Base64.NO_WRAP)
-                val dataJs = "window.__panoramaBase64 = \"data:image/jpeg;base64,$base64Str\";"
-                File(dir, "panorama_data.js").writeText(dataJs)
+                // 5. 写入 panorama_data.js（仅写相对路径配置，文件名与上面写入的一致）
+                File(dir, "panorama_data.js").writeText(
+                    "window.__panoramaConfig = {url: \"$imageFileName\"};"
+                )
 
-                // 5. 写入 index.html（直接使用模板，HTML 内置自动加载逻辑）
-                val htmlTemplate = Res.readBytes("files/panorama/panorama_viewer.html").decodeToString()
-                File(dir, "index.html").writeText(htmlTemplate)
-
-                "file://${dir.absolutePath}/index.html"
+                // 返回文件路径（后续会被 WebViewAssetLoader 映射为 https URL）
+                dir.absolutePath
             } catch (e: Exception) {
                 Log.e("PanoramaViewer", "Failed to prepare panorama files", e)
                 loadError = "全景图加载失败: ${e.message}"
                 null
             }
         }
+    }
+
+    // 看门狗：8 秒内未收到 onPanoramaLoaded 则提示超时
+    LaunchedEffect(htmlPath) {
+        if (htmlPath != null) {
+            renderState = 1 // 加载中
+            delay(8000)
+            if (isActive && renderState == 1) {
+                renderState = -1
+                loadError = "全景加载超时，请检查设备是否支持 WebGL"
+            }
+        }
+    }
+
+    // WebViewAssetLoader：把缓存目录映射为 https://appassets.androidplatform.net/panorama/...
+    val assetLoader = remember {
+        WebViewAssetLoader.Builder()
+            .setPathHandler("/panorama/", object : WebViewAssetLoader.PathHandler {
+                override fun handle(path: String): WebResourceResponse? {
+                    // path 去掉前缀后形如 "panorama_1234567890/panorama.png"
+                    return try {
+                        val file = File(context.cacheDir, path)
+                        if (!file.exists() || !file.isFile) {
+                            Log.w("PanoramaViewer", "AssetLoader miss: $path")
+                            return null
+                        }
+                        // 关键：encoding 仅对文本类型有意义，二进制（图片）必须为 null。
+                        // 传 "UTF-8" 会让 WebView 对二进制响应做文本规范化处理，
+                        // 导致 PNG/JPEG 字节流被破坏、Pannellum 解码失败（黑屏/loadError）。
+                        val mime: String
+                        val encoding: String?
+                        when (file.extension.lowercase()) {
+                            "js" -> { mime = "application/javascript"; encoding = "UTF-8" }
+                            "css" -> { mime = "text/css"; encoding = "UTF-8" }
+                            "html" -> { mime = "text/html"; encoding = "UTF-8" }
+                            "jpg", "jpeg" -> { mime = "image/jpeg"; encoding = null }
+                            "png" -> { mime = "image/png"; encoding = null }
+                            "webp" -> { mime = "image/webp"; encoding = null }
+                            else -> { mime = "application/octet-stream"; encoding = null }
+                        }
+                        WebResourceResponse(
+                            mime,
+                            encoding,
+                            FileInputStream(file)
+                        )
+                    } catch (e: Exception) {
+                        Log.w("PanoramaViewer", "AssetLoader failed for $path", e)
+                        null
+                    }
+                }
+            })
+            .build()
     }
 
     val webView = remember {
@@ -133,45 +245,72 @@ actual fun PanoramaViewer(
             // 启用 WebView 调试（chrome://inspect）
             WebView.setWebContentsDebuggingEnabled(true)
 
+            // JS 桥：HTML 中的 panorama_viewer.html 通过 window.AndroidBridge 回传加载结果
+            // 注意：@JavascriptInterface 回调运行在 WebView 私有 JavaBridge 线程，
+            // 必须切回主线程再写 Compose 状态，保证状态写入与重组时序正确。
+            val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
+            addJavascriptInterface(
+                PanoramaJsBridge(
+                    onRendered = {
+                        mainHandler.post { renderState = 2 }
+                    },
+                    onError = { msg ->
+                        mainHandler.post {
+                            renderState = -1
+                            loadError = msg
+                        }
+                    }
+                ),
+                "AndroidBridge"
+            )
+
             webChromeClient = object : WebChromeClient() {
                 override fun onConsoleMessage(consoleMessage: ConsoleMessage): Boolean {
-                    Log.d("PanoramaJS", "[${consoleMessage.messageLevel()}] ${consoleMessage.message()} (${consoleMessage.sourceId()}:${consoleMessage.lineNumber()})")
+                    Log.d(
+                        "PanoramaJS",
+                        "[${consoleMessage.messageLevel()}] ${consoleMessage.message()} (${consoleMessage.sourceId()}:${consoleMessage.lineNumber()})"
+                    )
                     return true
                 }
             }
 
             webViewClient = object : WebViewClient() {
+                override fun shouldInterceptRequest(
+                    view: WebView?,
+                    request: WebResourceRequest?
+                ): WebResourceResponse? {
+                    val url = request?.url?.toString() ?: return null
+                    return assetLoader.shouldInterceptRequest(url)
+                        ?: super.shouldInterceptRequest(view, request)
+                }
+
                 override fun onPageFinished(view: WebView?, url: String?) {
                     Log.i("PanoramaViewer", "Page finished: $url")
-                    // 后备：如果 load 事件未触发初始化，这里再调一次
-                    view?.evaluateJavascript(
-                        """if (typeof pannellum !== 'undefined' && !viewer && window.__panoramaBase64) {
-                            window.__loadPanoramaFromBase64();
-                        }""",
-                        null,
-                    )
                 }
             }
         }
     }
 
     LaunchedEffect(htmlPath) {
-        htmlPath?.let { path ->
+        htmlPath?.let { dirPath ->
             webView.post {
-                webView.loadUrl(path)
+                // WebViewAssetLoader 把缓存目录映射为 https://appassets.androidplatform.net/panorama/...
+                // 入口文件是缓存目录里的 index.html（由 panorama_viewer.html 模板写入）
+                webView.loadUrl("https://appassets.androidplatform.net/panorama/${File(dirPath).name}/index.html")
             }
         }
     }
 
     DisposableEffect(Unit) {
         onDispose {
+            // 销毁 WebView 前先调用 JS 清理，避免 Pannellum 的 WebGL 上下文泄漏
+            try {
+                webView.evaluateJavascript("if(typeof __destroyPanorama==='function') __destroyPanorama();", null)
+            } catch (_: Exception) { }
             webView.destroy()
             htmlPath?.let { path ->
                 try {
-                    val dir = File(path.removePrefix("file://").removeSuffix("/index.html"))
-                    if (dir.exists()) {
-                        dir.deleteRecursively()
-                    }
+                    File(path).deleteRecursively()
                 } catch (e: Exception) {
                     Log.w("PanoramaViewer", "Failed to cleanup temp files", e)
                 }
@@ -187,7 +326,7 @@ actual fun PanoramaViewer(
             modifier = Modifier.fillMaxSize(),
         )
 
-        // 错误提示覆盖层（资源加载失败时显示）
+        // 错误提示覆盖层
         loadError?.let { errorMsg ->
             Box(
                 modifier = Modifier
@@ -195,28 +334,30 @@ actual fun PanoramaViewer(
                     .background(Color.Black),
                 contentAlignment = Alignment.Center,
             ) {
-                androidx.compose.material3.Text(
+                Text(
                     text = errorMsg,
                     color = Color.White,
-                    style = androidx.compose.material3.MaterialTheme.typography.bodyMedium,
+                    style = MaterialTheme.typography.bodyMedium,
                     textAlign = TextAlign.Center,
                     modifier = Modifier.padding(32.dp),
                 )
             }
         }
 
-        // 加载中提示（htmlPath 还没准备好且没有错误时）
-        if (htmlPath == null && loadError == null && imageUrl.isNotEmpty()) {
+        // 加载中提示（htmlPath 已准备好但 JS 还没回调成功）
+        if (htmlPath != null && renderState != 2 && loadError == null && imageUrl.isNotEmpty()) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .background(Color.Black),
                 contentAlignment = Alignment.Center,
             ) {
-                androidx.compose.material3.CircularProgressIndicator(
-                    color = Color.White,
-                    strokeWidth = 3.dp,
-                )
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    CircularProgressIndicator(
+                        color = Color.White,
+                        strokeWidth = 3.dp,
+                    )
+                }
             }
         }
     }

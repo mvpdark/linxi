@@ -26,19 +26,13 @@ object AndroidAppContextHolder {
  * 注意：调用方需在 `startKoin` 前完成 [AndroidAppContextHolder] 的初始化。
  */
 val platformModule = module {
+    // PlatformContext 注册一次（与 Desktop/iOS 端保持一致），
+    // 供 TokenStore / SamService / LocalMessageStore / ImageSaver 等共用
     single {
-        val ctx = AndroidAppContextHolder.context
+        AndroidAppContextHolder.context
             ?: error("AndroidAppContextHolder 未初始化，请在 LingxiApplication.onCreate 中赋值")
-        TokenStore(ctx)
     }
-    single {
-        val ctx = AndroidAppContextHolder.context
-            ?: error("AndroidAppContextHolder 未初始化，请在 LingxiApplication.onCreate 中赋值")
-        SamService(ctx)
-    }
-    single {
-        val ctx = AndroidAppContextHolder.context
-            ?: error("AndroidAppContextHolder 未初始化，请在 LingxiApplication.onCreate 中赋值")
-        LocalMessageStore(ctx)
-    }
+    single { TokenStore(get()) }
+    single { SamService(get()) }
+    single { LocalMessageStore(get()) }
 }

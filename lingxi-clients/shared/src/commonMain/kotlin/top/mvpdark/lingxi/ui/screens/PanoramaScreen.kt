@@ -29,12 +29,16 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -44,7 +48,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
+import kotlinx.coroutines.launch
+import org.koin.compose.koinInject
 import org.koin.compose.viewmodel.koinViewModel
+import top.mvpdark.lingxi.core.util.ImageSaver
+import top.mvpdark.lingxi.core.util.UrlResolver
 import top.mvpdark.lingxi.ui.components.PanoramaViewer
 import top.mvpdark.lingxi.ui.imageedit.rememberImagePickerLauncher
 import top.mvpdark.lingxi.ui.panorama.PanoramaViewModel
@@ -67,8 +75,28 @@ fun PanoramaScreen(
         if (bytes != null) viewModel.onPickImage(bytes)
     }
 
+    // 图片保存：ImageSaver 由 Koin 注入，保存结果通过 Snackbar 反馈
+    val imageSaver: ImageSaver = koinInject()
+    val snackbarHostState = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
+    val saveResultImage: () -> Unit = {
+        val url = state.resultUrl
+        if (url != null) {
+            scope.launch {
+                val result = imageSaver.saveImage(
+                    imageUrl = UrlResolver.resolveImageUrl(url),
+                    suggestedName = "lingxi_panorama",
+                )
+                snackbarHostState.showSnackbar(
+                    result.getOrElse { it.message ?: "保存失败" },
+                )
+            }
+        }
+    }
+
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
                 title = {
@@ -122,6 +150,7 @@ fun PanoramaScreen(
 
                 PanoramaViewModel.Step.Result -> ResultContent(
                     state = state,
+                    onSaveImage = saveResultImage,
                     onResetEdit = viewModel::resetEdit,
                     onResetAll = viewModel::resetAll,
                 )
@@ -331,6 +360,7 @@ private fun GeneratingContent() {
 @Composable
 private fun ResultContent(
     state: top.mvpdark.lingxi.ui.panorama.PanoramaUiState,
+    onSaveImage: () -> Unit,
     onResetEdit: () -> Unit,
     onResetAll: () -> Unit,
 ) {
@@ -370,6 +400,16 @@ private fun ResultContent(
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 Button(
+                    onClick = onSaveImage,
+                    modifier = Modifier.weight(1f).height(48.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.primary,
+                    ),
+                    shape = RoundedCornerShape(12.dp),
+                ) {
+                    Text("保存图片")
+                }
+                Button(
                     onClick = onResetEdit,
                     modifier = Modifier.weight(1f).height(48.dp),
                     colors = ButtonDefaults.buttonColors(
@@ -383,7 +423,7 @@ private fun ResultContent(
                     onClick = onResetAll,
                     modifier = Modifier.weight(1f).height(48.dp),
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.primary,
+                        containerColor = MaterialTheme.colorScheme.primaryContainer,
                     ),
                     shape = RoundedCornerShape(12.dp),
                 ) {

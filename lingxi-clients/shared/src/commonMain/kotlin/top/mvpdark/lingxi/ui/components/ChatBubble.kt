@@ -1,17 +1,24 @@
 package top.mvpdark.lingxi.ui.components
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -54,7 +61,11 @@ import top.mvpdark.lingxi.ui.theme.userBubbleBrush
  * @param images 图片 URL 列表（data URL 或 http(s) URL）。
  * @param timestamp 时间戳文本（已格式化）。
  * @param modifier 修饰符。
+ * @param onImageClick 点击图片回调（全屏预览）。
+ * @param onImageLongClick 长按图片回调（保存图片）。
+ * @param onImageSave 点击保存按钮回调（null 表示不显示保存按钮）。
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun ChatBubble(
     text: String,
@@ -63,6 +74,8 @@ fun ChatBubble(
     timestamp: String = "",
     modifier: Modifier = Modifier,
     onImageClick: (String) -> Unit = {},
+    onImageLongClick: (String) -> Unit = {},
+    onImageSave: ((String) -> Unit)? = null,
 ) {
     val isDark = LocalDarkTheme.current
     val style = LocalThemeStyle.current
@@ -148,22 +161,48 @@ fun ChatBubble(
                 ) {
                     val imageShape = RoundedCornerShape(16.dp)
                     images.forEach { imageUrl ->
-                        AsyncImage(
-                            model = UrlResolver.resolveImageUrl(imageUrl),
-                            contentDescription = "消息图片",
-                            contentScale = ContentScale.FillWidth,
-                            modifier = Modifier
-                                .sizeIn(maxWidth = 240.dp, maxHeight = 320.dp)
-                                .clickable { onImageClick(imageUrl) }
-                                .then(
-                                    if (isNoirAurum) {
-                                        Modifier.border(width = 1.dp, color = Champagne.copy(alpha = 0.3f), shape = imageShape)
-                                    } else {
-                                        Modifier
-                                    }
-                                )
-                                .clip(imageShape),
-                        )
+                        Box {
+                            AsyncImage(
+                                model = UrlResolver.resolveImageUrl(imageUrl),
+                                contentDescription = "消息图片",
+                                contentScale = ContentScale.FillWidth,
+                                modifier = Modifier
+                                    .sizeIn(maxWidth = 240.dp, maxHeight = 320.dp)
+                                    .combinedClickable(
+                                        onClick = { onImageClick(imageUrl) },
+                                        onLongClick = { onImageLongClick(imageUrl) },
+                                    )
+                                    .then(
+                                        if (isNoirAurum) {
+                                            Modifier.border(width = 1.dp, color = Champagne.copy(alpha = 0.3f), shape = imageShape)
+                                        } else {
+                                            Modifier
+                                        }
+                                    )
+                                    .clip(imageShape),
+                            )
+
+                            // 右上角保存按钮覆盖层（半透明黑底 + 白色下载图标）
+                            if (onImageSave != null) {
+                                Box(
+                                    modifier = Modifier
+                                        .align(Alignment.TopEnd)
+                                        .padding(6.dp)
+                                        .size(28.dp)
+                                        .clip(CircleShape)
+                                        .background(Color.Black.copy(alpha = 0.5f))
+                                        .clickable { onImageSave(imageUrl) },
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Download,
+                                        contentDescription = "保存图片",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(16.dp),
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
             }

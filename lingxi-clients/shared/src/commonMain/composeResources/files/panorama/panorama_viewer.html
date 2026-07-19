@@ -2,6 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
+<!-- user-scalable=no：禁用 WebView 系统级缩放，避免与 Pannellum 自己的双指缩放冲突 -->
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>Panorama Viewer</title>
 <link rel="stylesheet" href="pannellum.css">
@@ -11,129 +12,130 @@ html, body { width: 100%; height: 100%; overflow: hidden; background: #000; }
 #viewer { width: 100vw; height: 100vh; }
 .hint {
   position: absolute; bottom: 16px; left: 50%; transform: translateX(-50%);
-  color: rgba(255,255,255,0.8); font-size: 13px; font-family: -apple-system, sans-serif;
-  background: rgba(0,0,0,0.4); padding: 6px 14px; border-radius: 16px;
-  pointer-events: none; z-index: 10;
+  color: rgba(255,255,255,0.85); font-size: 13px; font-family: -apple-system, sans-serif;
+  background: rgba(0,0,0,0.45); padding: 6px 14px; border-radius: 16px;
+  pointer-events: none; z-index: 10; max-width: 86vw; text-align: center;
+}
+/* 错误态：红色调，长文本可换行 */
+.hint.error {
+  background: rgba(140,20,20,0.75); border-radius: 10px;
+  white-space: normal; line-height: 1.5;
 }
 </style>
 </head>
 <body>
 <div id="viewer"></div>
 <div class="hint" id="hint">拖动画面查看 360 视角</div>
-<!-- panorama_data.js 设置 window.__panoramaBase64，必须在 pannellum.js 之前加载 -->
+<!--
+  panorama_data.js 由 Kotlin 侧生成，仅包含图片相对路径：
+    window.__panoramaConfig = {"url":"panorama.jpg"};
+  注意：不再内嵌 base64 大图（旧方案在低端机上 atob+逐字节转换会瞬时放大 4~5 倍内存）。
+  加载顺序必须是 panorama_data.js 在前、pannellum.js 在后、内联脚本最后。
+-->
 <script src="panorama_data.js"></script>
 <script src="pannellum.js"></script>
 <script>
 var viewer = null;
 
-// base64 转 blob: URL（blob: URL 是同源的，XHR 可以可靠加载；
-// file:// URL 在 Android WebView 中 XHR responseType="blob" 返回 null，导致白屏）
-function base64ToBlobUrl(base64) {
-  var pure = base64;
-  if (pure.indexOf(',') !== -1) {
-    pure = pure.split(',')[1];
+/* ---------- 与 Kotlin 的桥（addJavascriptInterface("AndroidBridge")） ----------
+ * 桥不存在时（例如桌面浏览器调试）自动降级为 console，保证页面可独立调试。 */
+function bridgeLog(msg) {
+  console.log(msg);
+  if (window.AndroidBridge && window.AndroidBridge.log) { window.AndroidBridge.log(msg); }
+}
+function bridgeLoaded() {
+  bridgeLog('panorama rendered');
+  if (window.AndroidBridge && window.AndroidBridge.onPanoramaLoaded) {
+    window.AndroidBridge.onPanoramaLoaded();
   }
-  var bytes = atob(pure);
-  var arr = new Uint8Array(bytes.length);
-  for (var i = 0; i < bytes.length; i++) {
-    arr[i] = bytes.charCodeAt(i);
+}
+function bridgeError(msg) {
+  console.error(msg);
+  var h = document.getElementById('hint');
+  if (h) { h.textContent = msg; h.className = 'hint error'; }
+  if (window.AndroidBridge && window.AndroidBridge.onPanoramaError) {
+    window.AndroidBridge.onPanoramaError(msg);
   }
-  return URL.createObjectURL(new Blob([arr], { type: 'image/jpeg' }));
 }
 
-// 由 Kotlin 调用：从 base64 数据加载全景图
-window.__loadPanoramaFromBase64 = function() {
-  if (typeof pannellum === 'undefined') {
-    document.getElementById('hint').textContent = '全景查看器加载失败';
-    console.error('pannellum undefined');
-    return;
-  }
-  if (!window.__panoramaBase64) {
-    document.getElementById('hint').textContent = '全景图数据未加载';
-    console.error('window.__panoramaBase64 not set');
-    return;
-  }
+/* ---------- WebGL 探测 ----------
+ * Pannellum 强依赖 WebGL；不支持时旧版只会黑屏无任何提示，
+ * 这里显式探测并给出中文错误（部分模拟器/老旧 WebView/关闭硬件加速的设备）。 */
+function isWebGLSupported() {
   try {
-    var blobUrl = base64ToBlobUrl(window.__panoramaBase64);
-    console.log('Created blob URL: ' + blobUrl.substring(0, 50) + '...');
-    if (viewer) { viewer.destroy(); viewer = null; }
-    var el = document.getElementById('viewer');
-    if (!el) return;
-    viewer = pannellum.viewer(el, {
-      type: 'equirectangular',
-      panorama: blobUrl,
-      autoLoad: true,
-      showZoomCtrl: false,
-      showFullscreenCtrl: true,
-      compass: false,
-      minHfov: 50,
-      maxHfov: 120,
-      friction: 0.15
-    });
-    viewer.on('loadError', function() {
-      document.getElementById('hint').textContent = '全景图加载失败';
-      console.error('pannellum loadError');
-    });
-    viewer.on('error', function(e) {
-      document.getElementById('hint').textContent = '全景图加载失败';
-      console.error('pannellum error: ' + JSON.stringify(e));
-    });
-    el.addEventListener('mousedown', hideHint, { once: true });
-    el.addEventListener('touchstart', hideHint, { once: true });
+    var canvas = document.createElement('canvas');
+    return !!(window.WebGLRenderingContext &&
+      (canvas.getContext('webgl') || canvas.getContext('experimental-webgl')));
   } catch (e) {
-    document.getElementById('hint').textContent = '全景图加载失败: ' + e.message;
-    console.error('Exception: ' + e.message);
+    return false;
   }
-};
-
-// 保留原始接口（直接传 URL），用于后备
-window.__loadPanorama = function(url) {
-  if (typeof pannellum === 'undefined') {
-    document.getElementById('hint').textContent = '全景查看器加载失败';
-    return;
-  }
-  try {
-    if (viewer) { viewer.destroy(); viewer = null; }
-    var el = document.getElementById('viewer');
-    if (!el) return;
-    viewer = pannellum.viewer(el, {
-      type: 'equirectangular',
-      panorama: url,
-      autoLoad: true,
-      showZoomCtrl: false,
-      showFullscreenCtrl: true,
-      compass: false,
-      minHfov: 50,
-      maxHfov: 120,
-      friction: 0.15
-    });
-    viewer.on('loadError', function() {
-      document.getElementById('hint').textContent = '全景图加载失败';
-    });
-    viewer.on('error', function() {
-      document.getElementById('hint').textContent = '全景图加载失败';
-    });
-    el.addEventListener('mousedown', hideHint, { once: true });
-    el.addEventListener('touchstart', hideHint, { once: true });
-  } catch (e) {
-    document.getElementById('hint').textContent = '全景图加载失败: ' + e.message;
-  }
-};
+}
 
 function hideHint() {
   var h = document.getElementById('hint');
   if (h) h.style.display = 'none';
 }
 
+/* ---------- 加载全景图 ----------
+ * url 为同源相对路径（如 panorama.jpg），页面由 WebViewAssetLoader
+ * 以 https://appassets.androidplatform.net/panorama/... 提供，
+ * Pannellum 内部 XHR 取图与页面同源，行为在所有 WebView 版本上一致。 */
+window.__loadPanorama = function(url) {
+  if (typeof pannellum === 'undefined') {
+    bridgeError('全景组件加载失败（pannellum.js 未加载）');
+    return;
+  }
+  if (!url) {
+    bridgeError('全景图数据未加载');
+    return;
+  }
+  try {
+    if (viewer) { viewer.destroy(); viewer = null; }
+    var el = document.getElementById('viewer');
+    if (!el) { bridgeError('全景容器不存在'); return; }
+    bridgeLog('init pannellum, url=' + url);
+    viewer = pannellum.viewer(el, {
+      type: 'equirectangular',
+      panorama: url,
+      autoLoad: true,
+      showZoomCtrl: false,
+      /* WebView 未实现 onShowCustomView，全屏按钮点击无效甚至卡死，直接隐藏 */
+      showFullscreenCtrl: false,
+      compass: false,
+      minHfov: 50,
+      maxHfov: 120,
+      friction: 0.15,
+      orientationOnByDefault: false
+    });
+    /* pannellum 的 load 事件 = 纹理上传完成，此时才认为渲染成功并通知 Kotlin 关闭看门狗 */
+    viewer.on('load', function() { bridgeLoaded(); });
+    /* 2.5.x 版本图片解码/XHR 失败走 error；个别版本走 loadError，两个都注册 */
+    viewer.on('error', function() { bridgeError('全景图渲染失败（图片解码或加载错误）'); });
+    viewer.on('loadError', function() { bridgeError('全景图加载失败'); });
+    el.addEventListener('mousedown', hideHint, { once: true });
+    el.addEventListener('touchstart', hideHint, { once: true });
+  } catch (e) {
+    bridgeError('全景图加载失败: ' + (e && e.message ? e.message : e));
+  }
+};
+
 window.__destroyPanorama = function() {
   if (viewer) { viewer.destroy(); viewer = null; }
 };
 
-// 页面加载完成后自动从 base64 初始化全景图
+/* ---------- 入口 ----------
+ * load 事件触发时 panorama_data.js / pannellum.js 均已同步执行完毕。 */
 window.addEventListener('load', function() {
-  console.log('Page loaded, __panoramaBase64 available: ' + (!!window.__panoramaBase64));
-  if (window.__panoramaBase64) {
-    window.__loadPanoramaFromBase64();
+  bridgeLog('page loaded');
+  if (!isWebGLSupported()) {
+    bridgeError('当前设备不支持 WebGL，无法显示 360° 全景');
+    return;
+  }
+  var cfg = window.__panoramaConfig;
+  if (cfg && cfg.url) {
+    window.__loadPanorama(cfg.url);
+  } else {
+    bridgeError('全景图数据未加载');
   }
 });
 </script>

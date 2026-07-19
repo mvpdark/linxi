@@ -3,14 +3,17 @@ package top.mvpdark.lingxi.ui.components
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -42,11 +45,13 @@ import top.mvpdark.lingxi.ui.theme.Obsidian
  *
  * @param model 图片模型，可为 ByteArray、String（URL / data URL）等 Coil3 支持的类型。
  * @param onDismiss 关闭回调。
+ * @param onSave 保存回调（null 表示不显示保存按钮）。
  */
 @Composable
 fun FullScreenImagePreview(
     model: Any?,
     onDismiss: () -> Unit,
+    onSave: (() -> Unit)? = null,
 ) {
     // 缩放与平移状态（zoom / pan）
     var scale by remember { mutableStateOf(1f) }
@@ -92,23 +97,52 @@ fun FullScreenImagePreview(
                     ),
             )
 
-            // 右上角关闭按钮（金色底 + 黑色 × 图标，黑金二元对比）
+            // 右上角按钮行：保存按钮（可选）+ 关闭按钮
             Box(
                 modifier = Modifier
                     .align(Alignment.TopEnd)
-                    .padding(16.dp)
-                    .size(36.dp)
-                    .clip(CircleShape)
-                    .background(Champagne)
-                    .clickable(onClick = onDismiss),
-                contentAlignment = Alignment.Center,
+                    .padding(16.dp),
             ) {
-                Icon(
-                    imageVector = Icons.Default.Close,
-                    contentDescription = "关闭",
-                    tint = Obsidian,
-                    modifier = Modifier.size(20.dp),
-                )
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    // 保存按钮（可选）
+                    if (onSave != null) {
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(CircleShape)
+                                .background(Champagne)
+                                .clickable(onClick = onSave),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Download,
+                                contentDescription = "保存图片",
+                                tint = Obsidian,
+                                modifier = Modifier.size(20.dp),
+                            )
+                        }
+                    }
+
+                    // 关闭按钮
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(CircleShape)
+                            .background(Champagne)
+                            .clickable(onClick = onDismiss),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "关闭",
+                            tint = Obsidian,
+                            modifier = Modifier.size(20.dp),
+                        )
+                    }
+                }
             }
         }
     }

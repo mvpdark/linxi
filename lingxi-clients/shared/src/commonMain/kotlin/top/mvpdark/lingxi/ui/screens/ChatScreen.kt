@@ -48,6 +48,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -58,6 +60,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -69,8 +72,11 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import kotlin.math.roundToInt
+import kotlinx.coroutines.launch
+import org.koin.compose.koinInject
 import org.koin.compose.viewmodel.koinViewModel
 import top.mvpdark.lingxi.core.util.EncodeUtils
+import top.mvpdark.lingxi.core.util.ImageSaver
 import top.mvpdark.lingxi.core.util.UrlResolver
 import top.mvpdark.lingxi.core.util.formatMessageTime
 import top.mvpdark.lingxi.core.util.formatSessionTime
@@ -112,6 +118,22 @@ fun ChatScreen(
     val state by chatViewModel.uiState.collectAsState()
     val listState = rememberLazyListState()
     val isNoirAurum = LocalThemeStyle.current == LingxiThemeStyle.NOIR_AURUM
+
+    // 图片保存：ImageSaver 由 Koin 注入，保存结果通过 Snackbar 反馈
+    val imageSaver: ImageSaver = koinInject()
+    val snackbarHostState = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
+    val saveImageToDevice: (String) -> Unit = { url ->
+        scope.launch {
+            val result = imageSaver.saveImage(
+                imageUrl = UrlResolver.resolveImageUrl(url),
+                suggestedName = "lingxi_chat",
+            )
+            snackbarHostState.showSnackbar(
+                result.getOrElse { it.message ?: "保存失败" },
+            )
+        }
+    }
 
     // 待发送图片（本地字节流）+ 全屏预览开关
     var pickedImageBytes by remember { mutableStateOf<ByteArray?>(null) }
@@ -177,6 +199,7 @@ fun ChatScreen(
                 }
             }
         },
+        snackbarHost = { SnackbarHost(snackbarHostState) },
     ) { paddingValues ->
         Box(modifier = Modifier
             .fillMaxSize()
@@ -236,6 +259,8 @@ fun ChatScreen(
                                 images = message.images,
                                 timestamp = formatMessageTime(message.timestamp),
                                 onImageClick = { url -> previewImageUrl = url },
+                                onImageLongClick = saveImageToDevice,
+                                onImageSave = saveImageToDevice,
                             )
                         }
 
@@ -260,6 +285,8 @@ fun ChatScreen(
                                         isUser = false,
                                         images = state.pendingImages,
                                         onImageClick = { url -> previewImageUrl = url },
+                                        onImageLongClick = saveImageToDevice,
+                                        onImageSave = saveImageToDevice,
                                     )
                                     if (state.isSending) {
                                         TypingIndicator()
@@ -319,6 +346,7 @@ fun ChatScreen(
         FullScreenImagePreview(
             model = UrlResolver.resolveImageUrl(url),
             onDismiss = { previewImageUrl = null },
+            onSave = { saveImageToDevice(url) },
         )
     }
 }
