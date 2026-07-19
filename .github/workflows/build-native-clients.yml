@@ -421,8 +421,9 @@ jobs:
       - name: Prepare release assets
         run: |
           mkdir -p release-assets
+          VERSION="v1.0.${{ github.run_number }}"
 
-          # 固定文件名（不带版本号，每次覆盖）
+          # 文件名带版本号，每次构建可区分
           copy_asset() {
             local artifact_dir="$1"
             local pattern="$2"
@@ -437,10 +438,10 @@ jobs:
             local found_file
             found_file=$(find "$artifact_dir" -name "$pattern" -type f | head -1)
             if [ -n "$found_file" ]; then
-              cp "$found_file" "release-assets/$output_name"
+              cp "$found_file" "release-assets/${VERSION}-${output_name}"
               local size_mb
-              size_mb=$(du -m "release-assets/$output_name" | cut -f1)
-              echo "✓ $label: $output_name (${size_mb} MB)"
+              size_mb=$(du -m "release-assets/${VERSION}-${output_name}" | cut -f1)
+              echo "✓ $label: ${VERSION}-${output_name} (${size_mb} MB)"
             else
               echo "✗ $label: no $pattern found in $artifact_dir"
             fi
@@ -454,17 +455,14 @@ jobs:
           echo "=== Release assets ==="
           ls -la release-assets/
 
-      - name: Publish to GitHub Release (latest, always overwrite)
+      - name: Publish to GitHub Release (versioned tag)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           VERSION="v1.0.${{ github.run_number }}"
 
-          # 删除旧的 latest release（如果存在）
-          gh release delete latest --yes --cleanup-tag 2>/dev/null || true
-
-          # 创建新的 latest release（tag 固定为 latest，标题带版本号）
-          gh release create latest \
+          # 创建带版本号的 tag 和 release（每次构建独立版本，不再覆盖）
+          gh release create "${VERSION}" \
             --title "灵犀 ${VERSION}" \
             --notes "## 灵犀 ${VERSION}
 
@@ -473,10 +471,24 @@ jobs:
           **版本号:** ${VERSION}
 
           ### 下载说明
-          - **Android**: 下载 \`lingxi-android.apk\`
-          - **Windows 安装版**: 下载 \`lingxi-windows.msi\`
-          - **Windows 便携版**: 下载 \`lingxi-windows-portable.exe\`
-          - **macOS Apple Silicon**: 下载 \`lingxi-macos-arm64.dmg\`
-
-          > 每次构建都会覆盖此 release，始终只保留最新版本。" \
+          - **Android**: 下载 \`${VERSION}-lingxi-android.apk\`
+          - **Windows 安装版**: 下载 \`${VERSION}-lingxi-windows.msi\`
+          - **Windows 便携版**: 下载 \`${VERSION}-lingxi-windows-portable.exe\`
+          - **macOS Apple Silicon**: 下载 \`${VERSION}-lingxi-macos-arm64.dmg\`" \
             release-assets/*
+
+      - name: Cleanup old releases (keep latest 10)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # 列出所有 release（按创建时间降序），保留最新 10 个，删除更老的
+          gh release list --limit 50 --json tagName,createdAt --jq '.[] | "\(.createdAt) \(.tagName)"' \
+            | sort -r \
+            | tail -n +11 \
+            | while read -r line; do
+                TAG=$(echo "$line" | awk '{print $2}')
+                if [ -n "$TAG" ] && [ "$TAG" != "latest" ]; then
+                  echo "Deleting old release: $TAG"
+                  gh release delete "$TAG" --yes --cleanup-tag 2>/dev/null || true
+                fi
+              done
