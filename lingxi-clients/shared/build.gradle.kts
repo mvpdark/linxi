@@ -69,6 +69,8 @@ kotlin {
             implementation(libs.onnxruntime.android)
             // rememberLauncherForActivityResult + ActivityResultContracts 需要 activity-compose
             implementation(libs.androidx.activity.compose)
+            // FileProvider（APK 自动更新安装）需要 core-ktx
+            implementation(libs.androidx.core.ktx)
         }
 
         val desktopMain by getting {
