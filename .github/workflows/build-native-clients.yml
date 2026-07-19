@@ -402,7 +402,7 @@ jobs:
   release:
     name: Publish to GitHub Releases
     needs: [build-android, build-desktop, build-desktop-macos-arm64]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
       contents: write
