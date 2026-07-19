@@ -24,17 +24,22 @@ import org.jetbrains.compose.resources.readResourceBytes
 import java.io.File
 
 /**
- * Android 全景查看器：用 WebView 加载本地 Pannellum HTML。
+ * Android 全景查看器：用 WebView + Pannellum 实现 360° 球面投影。
  *
- * 核心策略（修复白屏 bug）：
- * 1. 读取 pannellum.js/css/html 资源，内联到单个 HTML 字符串中
- * 2. 全景图 URL（data URL 或 http URL）作为全局变量追加到 HTML 末尾
- * 3. 页面加载完成后 onPageFinished 回调中调用 __loadPanorama
- * 4. data URL 与页面同源（about:blank），WebGL 可正常加载，不会触发跨域 tainted
+ * 核心策略（彻底修复白屏）：
+ * 1. 把 pannellum.js、pannellum.css、panorama_viewer.html 写到应用缓存目录
+ * 2. 把全景图（data URL 或 http URL）解码后写到同目录的 panorama.jpg
+ * 3. 修改 HTML 中的图片路径为相对路径 "panorama.jpg"
+ * 4. 用 loadUrl("file:///path/index.html") 加载，所有资源同源（file://）
+ * 5. HTML 页面加载后自动调用 __loadPanorama("panorama.jpg")
  *
- * 之前的方案（data URL → 临时文件 → file:// URL）会导致：
- * - WebGL texImage2D 加载 file:// 图片被跨域安全策略阻止
- * - 即使设了 allowFileAccessFromFileURLs 也无效（WebGL 的安全策略更严格）
+ * 之前的方案都失败的原因：
+ * - 方案 A（临时文件 + file:// + loadDataWithBaseURL("about:blank")）：
+ *   页面 origin 是 null，WebGL 加载 file:// 图片被跨域阻止
+ * - 方案 B（data URL 嵌入 HTML + loadDataWithBaseURL）：
+ *   data URL 太大（2-5MB），嵌入 HTML 后整体大小超限，WebView 加载失败
+ * - 当前方案（全部 file:// + loadUrl）：
+ *   页面和图片都是 file:// 协议，完全同源，WebGL 不会触发跨域检查
  */
 @SuppressLint("SetJavaScriptEnabled")
 @OptIn(InternalResourceApi::class)
@@ -45,69 +50,85 @@ actual fun PanoramaViewer(
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
 
-    // 最终要嵌入 HTML 的图片 URL（data URL 或 http URL）
-    var embeddedImageUrl by remember { mutableStateOf("") }
-    // 完整的 HTML 内容（含内联 JS/CSS + 图片 URL）
-    var htmlContent by remember { mutableStateOf<String?>(null) }
+    // 临时目录路径（所有资源放在同一目录，确保同源）
+    var htmlPath by remember { mutableStateOf<String?>(null) }
 
-    // 预处理图片 URL：
-    // - data URL / http URL 直接用
-    // - file:// URL 读取文件转成 data URL（避免 WebGL 跨域）
+    // 准备临时目录中的所有文件
     LaunchedEffect(imageUrl) {
-        embeddedImageUrl = if (imageUrl.isNotEmpty()) {
-            withContext(Dispatchers.IO) {
-                if (imageUrl.startsWith("file://")) {
-                    try {
-                        val path = imageUrl.removePrefix("file://")
-                        val bytes = File(path).readBytes()
-                        "data:image/png;base64," + android.util.Base64.encodeToString(
-                            bytes,
-                            android.util.Base64.NO_WRAP,
-                        )
-                    } catch (e: Exception) {
-                        android.util.Log.e("PanoramaViewer", "Failed to read file:// image", e)
-                        imageUrl
-                    }
-                } else {
-                    imageUrl
-                }
-            }
-        } else {
-            ""
-        }
-    }
-
-    // 构建 HTML 内容（含内联 pannellum.js + pannellum.css + 图片 URL）
-    LaunchedEffect(embeddedImageUrl) {
-        if (embeddedImageUrl.isEmpty()) {
-            htmlContent = null
+        if (imageUrl.isEmpty()) {
+            htmlPath = null
             return@LaunchedEffect
         }
-        htmlContent = withContext(Dispatchers.Default) {
+        htmlPath = withContext(Dispatchers.IO) {
             try {
-                val js = readResourceBytes("files/panorama/pannellum.js").decodeToString()
-                val css = readResourceBytes("files/panorama/pannellum.css").decodeToString()
-                val html = readResourceBytes("files/panorama/panorama_viewer.html").decodeToString()
-                val inlined = html
+                // 1. 创建临时目录
+                val dir = File(context.cacheDir, "panorama_${System.currentTimeMillis()}")
+                dir.mkdirs()
+
+                // 2. 写入 pannellum.js
+                val jsBytes = readResourceBytes("files/panorama/pannellum.js")
+                File(dir, "pannellum.js").writeBytes(jsBytes)
+
+                // 3. 写入 pannellum.css
+                val cssBytes = readResourceBytes("files/panorama/pannellum.css")
+                File(dir, "pannellum.css").writeBytes(cssBytes)
+
+                // 4. 写入全景图片到 panorama.jpg
+                val imageFile = File(dir, "panorama.jpg")
+                when {
+                    imageUrl.startsWith("data:") -> {
+                        // data URL → 解码 base64 写入文件
+                        val base64Data = imageUrl.substringAfter("base64,")
+                        val imageBytes = android.util.Base64.decode(base64Data, android.util.Base64.DEFAULT)
+                        imageFile.writeBytes(imageBytes)
+                    }
+                    imageUrl.startsWith("file://") -> {
+                        // file:// → 复制文件
+                        val srcPath = imageUrl.removePrefix("file://")
+                        File(srcPath).copyTo(imageFile, overwrite = true)
+                    }
+                    imageUrl.startsWith("http://") || imageUrl.startsWith("https://") -> {
+                        // http URL → 下载到本地文件
+                        val url = java.net.URL(imageUrl)
+                        url.openStream().use { input ->
+                            imageFile.outputStream().use { output ->
+                                input.copyTo(output)
+                            }
+                        }
+                    }
+                    else -> {
+                        // 未知格式，尝试当作文件路径
+                        try {
+                            File(imageUrl).copyTo(imageFile, overwrite = true)
+                        } catch (e: Exception) {
+                            android.util.Log.e("PanoramaViewer", "Unknown image format: $imageUrl", e)
+                            return@withContext null
+                        }
+                    }
+                }
+
+                // 5. 写入 index.html（修改图片路径为相对路径 panorama.jpg，页面加载后自动初始化）
+                val htmlTemplate = readResourceBytes("files/panorama/panorama_viewer.html").decodeToString()
+                val html = htmlTemplate
+                    // 页面加载后自动调用 __loadPanorama("panorama.jpg")
                     .replace(
-                        """<link rel="stylesheet" href="pannellum.css">""",
-                        "<style>$css</style>",
+                        "</body>",
+                        """<script>
+                        window.addEventListener('load', function() {
+                            if (typeof pannellum !== 'undefined') {
+                                window.__loadPanorama('panorama.jpg');
+                            }
+                        });
+                        </script>
+                        </body>""",
                     )
-                    .replace(
-                        """<script src="pannellum.js"></script>""",
-                        "<script>$js</script>",
-                    )
-                // 在 </body> 前追加一段 script，设置图片 URL 全局变量
-                // 不用字符串替换 pannellum.js 内部代码，避免误伤
-                val injectScript = """
-                <script>
-                window.__PANO_IMAGE_URL = "${embeddedImageUrl}";
-                </script>
-                """.trimIndent()
-                inlined.replace("</body>", "$injectScript\n</body>")
+                File(dir, "index.html").writeText(html)
+
+                // 返回 HTML 文件的 file:// URL
+                "file://${dir.absolutePath}/index.html"
             } catch (e: Exception) {
-                android.util.Log.e("PanoramaViewer", "Failed to load resources", e)
-                "<html><body><p style='color:white;text-align:center;margin-top:50%'>全景查看器资源加载失败</p></body></html>"
+                android.util.Log.e("PanoramaViewer", "Failed to prepare panorama files", e)
+                null
             }
         }
     }
@@ -119,18 +140,22 @@ actual fun PanoramaViewer(
             settings.domStorageEnabled = true
             settings.allowFileAccess = true
             settings.allowContentAccess = true
+            // 关键：允许 WebView 加载 file:// URL 的资源
+            settings.allowFileAccessFromFileURLs = true
+            settings.allowUniversalAccessFromFileURLs = true
             settings.mediaPlaybackRequiresUserGesture = false
             // 启用硬件加速，WebGL 需要
             setLayerType(android.view.View.LAYER_TYPE_HARDWARE, null)
             webChromeClient = WebChromeClient()
             webViewClient = object : WebViewClient() {
                 override fun onPageFinished(view: WebView?, url: String?) {
-                    android.util.Log.i("PanoramaViewer", "Page finished, loading panorama")
-                    // 页面加载完成后调用 __loadPanorama
-                    // 图片 URL 已通过注入的 script 设置为全局变量
+                    android.util.Log.i("PanoramaViewer", "Page finished: $url")
+                    // 页面加载完成后也调用一次 __loadPanorama（作为后备）
+                    // HTML 中的 load 事件应该已经触发了，这里防止时序问题
                     view?.evaluateJavascript(
-                        """if (window.__PANO_IMAGE_URL && typeof pannellum !== 'undefined') {
-                            window.__loadPanorama(window.__PANO_IMAGE_URL);
+                        """if (typeof pannellum !== 'undefined' && !window.__panoLoaded) {
+                            window.__panoLoaded = true;
+                            window.__loadPanorama('panorama.jpg');
                         }""",
                         null,
                     )
@@ -139,25 +164,30 @@ actual fun PanoramaViewer(
         }
     }
 
-    // HTML 内容就绪后加载到 WebView
-    LaunchedEffect(htmlContent) {
-        htmlContent?.let { html ->
+    // HTML 路径就绪后用 loadUrl 加载（不用 loadDataWithBaseURL）
+    LaunchedEffect(htmlPath) {
+        htmlPath?.let { path ->
             webView.post {
-                webView.loadDataWithBaseURL(
-                    "about:blank",
-                    html,
-                    "text/html",
-                    "UTF-8",
-                    null,
-                )
+                webView.loadUrl(path)
             }
         }
     }
 
-    // 生命周期：Composable 离开时销毁 WebView
+    // 生命周期：Composable 离开时销毁 WebView + 清理临时文件
     DisposableEffect(Unit) {
         onDispose {
             webView.destroy()
+            // 清理临时目录
+            htmlPath?.let { path ->
+                try {
+                    val dir = File(path.removePrefix("file://").removeSuffix("/index.html"))
+                    if (dir.exists()) {
+                        dir.deleteRecursively()
+                    }
+                } catch (e: Exception) {
+                    android.util.Log.w("PanoramaViewer", "Failed to cleanup temp files", e)
+                }
+            }
         }
     }
 
