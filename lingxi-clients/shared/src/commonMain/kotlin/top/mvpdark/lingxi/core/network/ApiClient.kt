@@ -57,7 +57,8 @@ class ApiClient(
             json(json)
         }
         install(Logging) {
-            level = LogLevel.INFO
+            // release 包关闭日志，调试时改为 HEADERS
+            level = LogLevel.NONE
         }
         install(WebSockets)
         install(HttpTimeout) {
@@ -77,7 +78,12 @@ class ApiClient(
         .replace("http://", "ws://")
         .replace("https://", "wss://")
 
-    /** 关闭客户端，释放资源。 */
+    /**
+     * 关闭客户端，释放资源。
+     *
+     * 注：ApiClient 在 Koin 中以 single 注册，进程退出时由 JVM/ART 统一清理，
+     * 通常无需显式调用 close()。保留方法便于在需要时（如热重载、测试场景）手动释放。
+     */
     fun close() {
         httpClient.close()
     }

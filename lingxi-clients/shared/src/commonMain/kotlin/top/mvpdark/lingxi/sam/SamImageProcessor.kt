@@ -23,7 +23,7 @@ data class PreprocessResult(
  * SAM 图像预处理器（纯 Kotlin 实现）。
  *
  * 移植自 transformers.js SAMImageProcessor 的预处理逻辑：
- * 1. 长边 resize 到 1024（双线性插值，保持宽高比，corner-aligned）
+ * 1. 长边 resize 到 1024（双线性插值，保持宽高比，half-pixel center，align_corners=False）
  * 2. 右下 pad 到 1024×1024（补 0）
  * 3. 归一化：mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]
  * 4. HWC 转 CHW
@@ -64,11 +64,13 @@ object SamImageProcessor {
             }
         }
         val channelStride = TARGET_SIZE * TARGET_SIZE
-        val xRatio = width.toFloat() / newW
-        val yRatio = height.toFloat() / newH
+        // 使用 1/scale 作为反向映射比例，避免 newW/newH 整数截断引入的累积误差；
+        // 数学上 width/newW ≈ 1/scale（scale = TARGET_SIZE / maxOf(width, height)）。
+        val xRatio = 1f / scale
+        val yRatio = 1f / scale
 
         for (y in 0 until newH) {
-            // corner-aligned 双线性：src = (dst + 0.5) * ratio - 0.5
+            // half-pixel center 双线性（align_corners=False）：src = (dst + 0.5) * ratio - 0.5
             val sy = (y + 0.5f) * yRatio - 0.5f
             val y0 = floor(sy).toInt().coerceIn(0, height - 1)
             val y1 = (y0 + 1).coerceIn(0, height - 1)

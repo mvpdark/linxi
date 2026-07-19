@@ -13,16 +13,20 @@ import javax.swing.filechooser.FileNameExtensionFilter
 @Composable
 actual fun rememberImagePickerLauncher(onResult: (ByteArray?) -> Unit): () -> Unit {
     val scope = rememberCoroutineScope()
+    // 缓存 JFileChooser 实例，避免每次打开都重新创建（包含文件系统扫描开销）
+    val fileChooser = remember {
+        JFileChooser().apply {
+            fileFilter = FileNameExtensionFilter(
+                "Images (jpg, png, webp, gif, bmp)",
+                "jpg", "jpeg", "png", "webp", "gif", "bmp",
+            )
+            isMultiSelectionEnabled = false
+        }
+    }
     // remember(Unit) 避免 onResult 变化导致 remember 失效
     return remember(Unit) {
         {
-            val fileChooser = JFileChooser().apply {
-                fileFilter = FileNameExtensionFilter(
-                    "Images (jpg, png, webp, gif, bmp)",
-                    "jpg", "jpeg", "png", "webp", "gif", "bmp",
-                )
-                isMultiSelectionEnabled = false
-            }
+            // TODO: 传入 Compose 窗口的 AWT Window 作为 parent，避免对话框可能出现在屏幕角落
             val result = fileChooser.showOpenDialog(null)
             if (result == JFileChooser.APPROVE_OPTION) {
                 val selectedFile = fileChooser.selectedFile

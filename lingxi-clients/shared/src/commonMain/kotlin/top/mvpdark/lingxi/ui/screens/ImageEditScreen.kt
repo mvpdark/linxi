@@ -49,6 +49,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -62,6 +63,8 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -203,7 +206,7 @@ private fun UploadContent(
         )
         Spacer(Modifier.height(8.dp))
         Text(
-            text = "支持 JPG、PNG，自动压缩到 1024px",
+            text = "支持 JPG、PNG",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -293,18 +296,29 @@ private fun SegmentingContent(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Spacer(Modifier.height(16.dp))
-        LinearProgressIndicator(
-            progress = { (progress / 100f).coerceIn(0f, 1f) },
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(6.dp),
-        )
+        // SAM 已加载时 loadModel 被跳过，progress 始终为 0，此时显示不确定进度条
+        if (progress == 0) {
+            LinearProgressIndicator(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(6.dp),
+            )
+        } else {
+            LinearProgressIndicator(
+                progress = { (progress / 100f).coerceIn(0f, 1f) },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(6.dp),
+            )
+        }
         Spacer(Modifier.height(8.dp))
-        Text(
-            text = "$progress%",
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        if (progress > 0) {
+            Text(
+                text = "$progress%",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
     }
 }
 
@@ -327,6 +341,7 @@ private fun EditContent(
     state: ImageEditUiState,
     viewModel: ImageEditViewModel,
 ) {
+    // TODO: 如果 objects 改为 SnapshotStateList，可用 derivedStateOf 优化
     val hasSelected = state.objects.any { it.selected }
     val selectedCount = state.objects.count { it.selected }
 
@@ -357,19 +372,28 @@ private fun EditContent(
                     val objects = state.objects
                     // 跟踪 Canvas 实际尺寸（AsyncImage 加载完成后会变化）
                     var canvasSize by remember { mutableStateOf(IntSize.Zero) }
+                    // 用 rememberUpdatedState 避免每次 toggleSelect 都重启手势检测器
+                    val currentObjects by rememberUpdatedState(objects)
+                    val currentCanvasSize by rememberUpdatedState(canvasSize)
                     Canvas(
                         modifier = Modifier
                             .matchParentSize()
                             .onSizeChanged { canvasSize = it }
-                            .pointerInput(objects, canvasSize) {
-                                val canvasW = canvasSize.width.toFloat()
-                                val canvasH = canvasSize.height.toFloat()
+                            .semantics {
+                                contentDescription = "图片标注区域，共 ${objects.size} 个检测物体"
+                            }
+                            .pointerInput(Unit) {
                                 detectTapGestures { offset ->
+                                    val size = currentCanvasSize
+                                    val canvasW = size.width.toFloat()
+                                    val canvasH = size.height.toFloat()
                                     if (canvasW <= 0f || canvasH <= 0f) return@detectTapGestures
                                     val nx = offset.x / canvasW
                                     val ny = offset.y / canvasH
+                                    // 读取最新的物体列表
+                                    val objs = currentObjects
                                     // 遍历物体，判断点击位置是否在某个物体内
-                                    val hit = objects.firstOrNull { obj ->
+                                    val hit = objs.firstOrNull { obj ->
                                         if (obj.polygon != null && obj.polygon.size >= 3) {
                                             pointInPolygon(nx, ny, obj.polygon)
                                         } else {
@@ -696,6 +720,7 @@ private fun DrawScope.drawAnnotations(
     val h = size.height
     if (w <= 0f || h <= 0f) return
 
+    // 注意：每次 draw 创建 Path，物体数量少时 GC 影响可忽略
     for (obj in objects) {
         val color = if (obj.selected) AnnotationBlue else AnnotationRed
         val strokeWidth = if (obj.selected) 3f else 2f

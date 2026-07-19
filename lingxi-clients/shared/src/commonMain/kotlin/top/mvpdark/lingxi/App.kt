@@ -20,6 +20,7 @@ import top.mvpdark.lingxi.ui.theme.LingxiTheme
 fun LingxiApp() {
     LingxiTheme {
         // 触发 Koin 依赖解析，确认上下文可用
+        // 确保平台入口（LingxiApplication/Main.kt）已先调用 startKoin，否则此处会抛 Koin 异常
         @Suppress("unused")
         val authRepository: AuthRepository = koinInject()
 

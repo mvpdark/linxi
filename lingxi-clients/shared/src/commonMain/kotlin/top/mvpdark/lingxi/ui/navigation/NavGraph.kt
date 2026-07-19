@@ -64,10 +64,14 @@ fun NavGraph() {
                     navController.navigate(Routes.chat(sessionId))
                 },
                 onNavigateImageEdit = {
-                    navController.navigate(Routes.IMAGE_EDIT)
+                    navController.navigate(Routes.IMAGE_EDIT) {
+                        launchSingleTop = true
+                    }
                 },
                 onNavigatePanorama = {
-                    navController.navigate(Routes.PANORAMA)
+                    navController.navigate(Routes.PANORAMA) {
+                        launchSingleTop = true
+                    }
                 },
                 onLoggedOut = {
                     navController.navigate(Routes.LOGIN) {
@@ -83,10 +87,11 @@ fun NavGraph() {
                 navArgument(Routes.SESSION_ID_ARG) { type = NavType.StringType },
             ),
         ) { backStackEntry ->
-            val sessionId: String = backStackEntry.savedStateHandle[Routes.SESSION_ID_ARG] ?: ""
+            val sessionId: String = backStackEntry.arguments?.getString(Routes.SESSION_ID_ARG) ?: ""
             ChatScreen(sessionId = sessionId)
         }
 
+        // ImageEditViewModel 通过 koinViewModel() 注入，生命周期绑定到 IMAGE_EDIT back stack entry
         composable(Routes.IMAGE_EDIT) {
             ImageEditScreen()
         }

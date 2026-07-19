@@ -48,8 +48,14 @@ actual fun maskToPngBase64(mask: ByteArray, width: Int, height: Int): String {
     }.getOrElse { "" }
 }
 
-/** 不透明白色 ARGB。 */
+/**
+ * 不透明白色 ARGB。
+ *
+ * 注意：0xFFFFFFFF.toInt() 在 Kotlin/Java 中因 Int 溢出为 -1，
+ * 但 Bitmap.setPixels 会按 ARGB 字节序正确解释为不透明白色
+ * （A=255, R=255, G=255, B=255），与 android.graphics.Color.WHITE 等价。
+ */
 private const val WHITE_ARGB = 0xFFFFFFFF.toInt()
 
-/** 全透明 ARGB。 */
+/** 全透明 ARGB（A=0, R=0, G=0, B=0），等价于 android.graphics.Color.TRANSPARENT。 */
 private const val TRANSPARENT_ARGB = 0x00000000

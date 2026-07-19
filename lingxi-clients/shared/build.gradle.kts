@@ -79,6 +79,12 @@ kotlin {
                 implementation(libs.onnxruntime.jvm)
             }
         }
+
+        commonTest {
+            dependencies {
+                implementation(libs.kotlin.test)
+            }
+        }
     }
 
     @OptIn(ExperimentalKotlinGradlePluginApi::class)
@@ -88,6 +94,9 @@ kotlin {
 }
 
 android {
+    // namespace 仅影响 R 类生成位置，与 applicationId 解耦。
+    // shared 模块用 top.mvpdark.lingxi.shared，androidApp 用 com.mvpdark.lingxi，
+    // 二者差异不影响功能，保持现状。
     namespace = "top.mvpdark.lingxi.shared"
     compileSdk = 36
 

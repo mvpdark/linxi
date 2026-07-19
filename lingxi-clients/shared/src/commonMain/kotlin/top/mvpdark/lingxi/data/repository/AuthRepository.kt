@@ -34,6 +34,8 @@ class AuthRepository(
             throw AuthException(body.error.ifBlank { "用户名或密码错误" })
         }
         // 持久化 token
+        // 注意：access/refresh token 分两次写入，中间崩溃会导致不一致。
+        // TODO: 在 TokenStore 添加 setTokens 原子方法，保证两 token 同时落盘
         tokenStore.setAccessToken(body.accessToken)
         tokenStore.setRefreshToken(body.refreshToken)
         return body

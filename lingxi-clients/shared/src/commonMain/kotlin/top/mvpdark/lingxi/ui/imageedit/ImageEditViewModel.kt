@@ -9,6 +9,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import top.mvpdark.lingxi.core.util.PlatformLogger
 import top.mvpdark.lingxi.data.model.Bbox
 import top.mvpdark.lingxi.data.model.DetectedObject
 import top.mvpdark.lingxi.data.repository.ImageEditRepository
@@ -111,6 +112,12 @@ class ImageEditViewModel(
                 }
 
                 val displayUrl = if (uploadResult.success) uploadResult.image else null
+                // VLM 检测失败时不阻塞流程，记录 warning 供 Edit 步骤展示
+                val detectWarning = if (!detectResult.success) {
+                    "物品检测失败：${detectResult.error.ifEmpty { "未知错误" }}，可手动框选或直接改图"
+                } else {
+                    null
+                }
                 val detectedObjects = if (detectResult.success) {
                     detectResult.objects.mapIndexed { idx, obj ->
                         DetectedObject(
@@ -153,7 +160,7 @@ class ImageEditViewModel(
                                 _uiState.update { it.copy(samProgress = progress) }
                             }
                         }.onFailure { e ->
-                            println("[ImageEditViewModel] SAM loadModel failed: ${e.message}")
+                            PlatformLogger.e("ImageEditViewModel", "SAM loadModel failed", e)
                         }
                     }
 
@@ -184,7 +191,7 @@ class ImageEditViewModel(
                     }
                 }
 
-                _uiState.update { it.copy(step = Step.Edit) }
+                _uiState.update { it.copy(step = Step.Edit, error = detectWarning) }
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
             } catch (e: Throwable) {
@@ -316,6 +323,16 @@ class ImageEditViewModel(
      */
     fun continueEdit() {
         _uiState.value = ImageEditUiState()
+    }
+
+    /**
+     * ViewModel 销毁时回调。
+     *
+     * SamService 是 Koin single，生命周期长于 ViewModel，不在此关闭。
+     * viewModelScope 会自动取消所有协程，无需手动处理。
+     */
+    override fun onCleared() {
+        super.onCleared()
     }
 
     /** 清除错误提示。 */

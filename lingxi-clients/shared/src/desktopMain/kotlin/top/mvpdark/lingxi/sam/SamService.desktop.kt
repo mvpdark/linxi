@@ -6,6 +6,7 @@ import ai.onnxruntime.OrtSession
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import top.mvpdark.lingxi.core.network.PlatformContext
+import top.mvpdark.lingxi.core.util.PlatformLogger
 import top.mvpdark.lingxi.data.model.Bbox
 import java.io.ByteArrayInputStream
 import java.io.File
@@ -55,7 +56,7 @@ actual class SamService actual constructor(@Suppress("UNUSED_PARAMETER") context
     private var visionOutputName: String = "image_embeddings"
     private var decoderEmbeddingsName: String = "image_embeddings"
     private var decoderBoxesName: String = "input_boxes"
-    private var decoderOrigSizeName: String = "original_sizes"
+    private var decoderOrigSizeName: String? = "original_sizes"
     private var decoderReshapedSizeName: String? = null
     private var decoderOutputName: String = "pred_masks"
 
@@ -91,7 +92,7 @@ actual class SamService actual constructor(@Suppress("UNUSED_PARAMETER") context
             }
             // XNNPACK EP 加速 CPU 推理；部分平台/构建可能不包含 XNNPACK，静默忽略
             runCatching { opts.addXnnpack(emptyMap()) }
-                .onFailure { println("[SamService:Desktop] XNNPACK unavailable: ${it.message}") }
+                .onFailure { PlatformLogger.w("SamService", "XNNPACK unavailable: ${it.message}") }
 
             try {
                 // 3. 加载 vision encoder（用文件路径，不用字节，因 .onnx_data 需同目录）
@@ -107,8 +108,7 @@ actual class SamService actual constructor(@Suppress("UNUSED_PARAMETER") context
                 isReady = true
                 onProgress(100, "模型加载完成")
             } catch (e: Exception) {
-                println("[SamService:Desktop] loadModel failed: ${e.message}")
-                e.printStackTrace()
+                PlatformLogger.e("SamService", "loadModel failed", e)
                 runCatching { visionSession?.close() }
                 runCatching { decoderSession?.close() }
                 visionSession = null
@@ -159,6 +159,8 @@ actual class SamService actual constructor(@Suppress("UNUSED_PARAMETER") context
                 val origW = image.width
                 val origH = image.height
                 val pixels = IntArray(origW * origH)
+                // getRGB(int, int, int, int, int[], int, int) 是批量读取 API（整块矩形区域），
+                // 非逐像素调用，性能可接受；保持不变。
                 image.getRGB(0, 0, origW, origH, pixels, 0, origW)
 
                 // 2. 预处理：SamImageProcessor.preprocess → CHW FloatArray + 尺寸信息
@@ -200,23 +202,22 @@ actual class SamService actual constructor(@Suppress("UNUSED_PARAMETER") context
                 )
                 resources.add(boxesTensor)
 
-                // 创建 original_sizes tensor (shape [2]，int64)
-                // 注意：部分模型可能期望 [1, 2]，如遇形状不匹配请调整此处
-                val origSizes = longArrayOf(origH.toLong(), origW.toLong())
-                // 检测模型期望的 original_sizes shape：[2] 或 [1, 2]
-                val origSizeShape = resolveOrigSizeShape(decoder, decoderOrigSizeName)
-                val origSizesTensor = OnnxTensor.createTensor(
-                    env, LongBuffer.wrap(origSizes), origSizeShape,
-                )
-                resources.add(origSizesTensor)
-
                 // 构造 decoder 输入（按模型实际需要补充 optional 输入）
                 val decoderInputs = mutableMapOf<String, OnnxTensor>(
                     decoderEmbeddingsName to embeddingsTensor,
                     decoderBoxesName to boxesTensor,
                 )
-                if (decoder.inputNames.contains(decoderOrigSizeName)) {
-                    decoderInputs[decoderOrigSizeName] = origSizesTensor
+                // 仅当模型需要 original_sizes 时才创建（避免无谓的张量分配）
+                val origSizeName = decoderOrigSizeName
+                if (origSizeName != null && decoder.inputNames.contains(origSizeName)) {
+                    val origSizes = longArrayOf(origH.toLong(), origW.toLong())
+                    // 检测模型期望的 original_sizes shape：[2] 或 [1, 2]
+                    val origSizeShape = resolveOrigSizeShape(decoder, origSizeName)
+                    val origSizesTensor = OnnxTensor.createTensor(
+                        env, LongBuffer.wrap(origSizes), origSizeShape,
+                    )
+                    resources.add(origSizesTensor)
+                    decoderInputs[origSizeName] = origSizesTensor
                 }
                 // 部分模型还需要 reshaped_input_sizes（resize 后的 [H, W]）
                 decoderReshapedSizeName?.let { name ->
@@ -230,7 +231,7 @@ actual class SamService actual constructor(@Suppress("UNUSED_PARAMETER") context
                     }
                 }
 
-                println("[SamService:Desktop] decoder inputs: ${decoderInputs.keys}")
+                PlatformLogger.d("SamService", "decoder inputs: ${decoderInputs.keys}")
                 val decoderResult = decoder.run(decoderInputs)
                 resources.add(decoderResult)
 
@@ -242,7 +243,7 @@ actual class SamService actual constructor(@Suppress("UNUSED_PARAMETER") context
                     )
 
                 val shape = predMasksTensor.info.shape
-                println("[SamService:Desktop] pred_masks shape: ${shape.toList()}")
+                PlatformLogger.d("SamService", "pred_masks shape: ${shape.toList()}")
 
                 // 解析维度：[1, N, (C), H, W] 或 [N, (C), H, W] 或 [N, H, W]
                 val (hLow, wLow, _) = resolveMaskDims(shape)
@@ -293,9 +294,9 @@ actual class SamService actual constructor(@Suppress("UNUSED_PARAMETER") context
 
                 SamSegmentResult(success = true, objects = results)
             } catch (e: Exception) {
-                println("[SamService:Desktop] segment failed: ${e.message}")
-                e.printStackTrace()
-                SamSegmentResult(success = false, error = e.message ?: "分割失败")
+                PlatformLogger.e("SamService", "segment failed", e)
+                val errorType = e::class.simpleName ?: "Exception"
+                SamSegmentResult(success = false, error = "[$errorType] ${e.message ?: "分割失败"}")
             } finally {
                 // 逆序关闭：先关 decoder 结果（释放 pred_masks），
                 // 再关输入张量，最后关 vision 结果（释放 embeddings）
@@ -326,14 +327,26 @@ actual class SamService actual constructor(@Suppress("UNUSED_PARAMETER") context
     private fun resolveModelsDir(): File {
         // 优先：Compose Desktop 打包后设置的系统属性
         val resourcesDir = System.getProperty("compose.application.resources.dir")
-        if (resourcesDir != null && File(resourcesDir).exists()) {
-            return File(resourcesDir, "models/edgetam")
+        if (resourcesDir != null) {
+            val modelsDir = File(resourcesDir, "models/edgetam")
+            if (modelsDir.exists()) return modelsDir
         }
         // 回退 1：开发时项目根目录下的 desktopApp/resources
         val devDir = File("desktopApp/resources/models/edgetam")
         if (devDir.exists()) return devDir
         // 回退 2：用户主目录下的 .lingxi/models/edgetam
-        return File(System.getProperty("user.home"), ".lingxi/models/edgetam")
+        val homeDir = File(System.getProperty("user.home"), ".lingxi/models/edgetam")
+        if (homeDir.exists()) return homeDir
+        // 回退 3：基于当前 jar 所在路径定位模型目录（打包发布后更健壮）
+        val jarDir = runCatching {
+            File(SamService::class.java.protectionDomain.codeSource.location.toURI()).parentFile
+        }.getOrNull()
+        if (jarDir != null) {
+            val jarModelsDir = File(jarDir, "models/edgetam")
+            if (jarModelsDir.exists()) return jarModelsDir
+        }
+        // 最终回退到开发目录（即使不存在，让后续 require 报错给出明确路径）
+        return devDir
     }
 
     /**
@@ -345,12 +358,12 @@ actual class SamService actual constructor(@Suppress("UNUSED_PARAMETER") context
     private fun discoverVisionIO(session: OrtSession) {
         val inputs = session.inputNames
         val outputs = session.outputNames
-        println("[SamService:Desktop] Vision inputs=$inputs, outputs=$outputs")
+        PlatformLogger.d("SamService", "Vision inputs=$inputs, outputs=$outputs")
         visionInputName = inputs.firstOrNull { it in VISION_INPUT_CANDIDATES }
             ?: inputs.first()
         visionOutputName = outputs.firstOrNull { it in VISION_OUTPUT_CANDIDATES }
             ?: outputs.first()
-        println("[SamService:Desktop] Vision resolved: input=$visionInputName, output=$visionOutputName")
+        PlatformLogger.d("SamService", "Vision resolved: input=$visionInputName, output=$visionOutputName")
     }
 
     /**
@@ -365,7 +378,7 @@ actual class SamService actual constructor(@Suppress("UNUSED_PARAMETER") context
     private fun discoverDecoderIO(session: OrtSession) {
         val inputs = session.inputNames
         val outputs = session.outputNames
-        println("[SamService:Desktop] Decoder inputs=$inputs, outputs=$outputs")
+        PlatformLogger.d("SamService", "Decoder inputs=$inputs, outputs=$outputs")
 
         decoderEmbeddingsName = inputs.firstOrNull { it in DECODER_EMBED_CANDIDATES }
             ?: inputs.firstOrNull { it.contains("embed", ignoreCase = true) }
@@ -379,7 +392,7 @@ actual class SamService actual constructor(@Suppress("UNUSED_PARAMETER") context
         decoderOrigSizeName = inputs.firstOrNull { it in DECODER_ORIG_SIZE_CANDIDATES }
             ?: inputs.firstOrNull { it.contains("orig", ignoreCase = true) }
             ?: inputs.firstOrNull { it.contains("size", ignoreCase = true) }
-            ?: inputs.last()
+            // 不回退到 inputs.last()，避免误塞 origSizesTensor 到错误位置
 
         decoderReshapedSizeName = inputs.firstOrNull {
             it.contains("reshaped", ignoreCase = true)
@@ -389,9 +402,10 @@ actual class SamService actual constructor(@Suppress("UNUSED_PARAMETER") context
             ?: outputs.firstOrNull { it.contains("mask", ignoreCase = true) }
             ?: outputs.first()
 
-        println(
-            "[SamService:Desktop] Decoder resolved: embed=$decoderEmbeddingsName, " +
-                "boxes=$decoderBoxesName, origSize=$decoderOrigSizeName, " +
+        PlatformLogger.d(
+            "SamService",
+            "Decoder resolved: embed=$decoderEmbeddingsName, " +
+                "boxes=$decoderBoxesName, origSize=${decoderOrigSizeName ?: "N/A"}, " +
                 "reshapedSize=$decoderReshapedSizeName, output=$decoderOutputName",
         )
     }

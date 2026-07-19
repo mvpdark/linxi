@@ -43,6 +43,7 @@ class ImageEditRepository(
                 },
             ).body<UploadResponse>()
         }.getOrElse { e ->
+            // TODO: 对非预期异常返回通用文案，避免泄露内部信息
             UploadResponse(success = false, error = e.message ?: "上传失败")
         }
     }
@@ -62,6 +63,7 @@ class ImageEditRepository(
                 },
             ).body<VlmDetectResponse>()
         }.getOrElse { e ->
+            // TODO: 对非预期异常返回通用文案，避免泄露内部信息
             VlmDetectResponse(success = false, error = e.message ?: "检测失败")
         }
     }
@@ -90,6 +92,7 @@ class ImageEditRepository(
                 },
             ).body<ImageEditResponse>()
         }.getOrElse { e ->
+            // TODO: 对非预期异常返回通用文案，避免泄露内部信息
             ImageEditResponse(success = false, error = e.message ?: "生成失败")
         }
     }
@@ -138,6 +141,7 @@ class ImageEditRepository(
                 },
             ).body<ImageEditResponse>()
         }.getOrElse { e ->
+            // TODO: 对非预期异常返回通用文案，避免泄露内部信息
             ImageEditResponse(success = false, error = e.message ?: "生成失败")
         }
     }
@@ -153,9 +157,11 @@ class ImageEditRepository(
         bytes: ByteArray,
         fileName: String,
     ) {
+        // 清洗文件名：移除引号与换行，避免破坏 Content-Disposition 头
+        val safeFileName = fileName.replace("\"", "").replace("\r", "").replace("\n", "")
         append(name, bytes, Headers.build {
-            append(HttpHeaders.ContentDisposition, "form-data; name=\"$name\"; filename=\"$fileName\"")
-            append(HttpHeaders.ContentType, guessContentType(fileName))
+            append(HttpHeaders.ContentDisposition, "form-data; name=\"$name\"; filename=\"$safeFileName\"")
+            append(HttpHeaders.ContentType, guessContentType(safeFileName))
         })
     }
 
@@ -167,7 +173,8 @@ class ImageEditRepository(
             "webp" -> "image/webp"
             "gif" -> "image/gif"
             "bmp" -> "image/bmp"
-            else -> "image/jpeg"
+            // 未知扩展名使用通用二进制流，避免误传 image/jpeg
+            else -> "application/octet-stream"
         }
     }
 }

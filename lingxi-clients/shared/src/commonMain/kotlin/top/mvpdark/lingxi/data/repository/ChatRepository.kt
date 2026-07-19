@@ -18,6 +18,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.serialization.encodeToString
 import top.mvpdark.lingxi.core.network.ApiClient
 import top.mvpdark.lingxi.core.network.TokenStore
+import top.mvpdark.lingxi.core.util.PlatformLogger
 import top.mvpdark.lingxi.core.util.runCatchingCancellable
 import top.mvpdark.lingxi.data.model.AgentEvent
 import top.mvpdark.lingxi.data.model.AuthFrame
@@ -78,7 +79,9 @@ class ChatRepository(
     ): Flow<AgentEvent> = callbackFlow {
         val token = tokenStore.getAccessToken()
         if (token.isNullOrBlank()) {
-            trySend(AgentEvent(type = "error", error = "未登录"))
+            if (trySend(AgentEvent(type = "error", error = "未登录")).isFailure) {
+                PlatformLogger.w("ChatRepository", "Failed to send event: channel may be closed")
+            }
             close()
             return@callbackFlow
         }
@@ -92,6 +95,8 @@ class ChatRepository(
                 },
             ) {
                 // 1. 首帧鉴权
+                // 注意：authPlugin 已在 WS 升级请求中注入 Authorization 头，
+                // 此处额外发送 auth 帧是协议要求（服务端通过帧二次确认）
                 val authFrame = apiClient.json.encodeToString(AuthFrame(token = token))
                 send(Frame.Text(authFrame))
 
@@ -100,7 +105,9 @@ class ChatRepository(
                 if (authAck != null) {
                     val ackText = authAck.readText()
                     if (!ackText.contains("auth_ok")) {
-                        trySend(AgentEvent(type = "error", error = "鉴权失败：$ackText"))
+                        if (trySend(AgentEvent(type = "error", error = "鉴权失败：$ackText")).isFailure) {
+                            PlatformLogger.w("ChatRepository", "Failed to send event: channel may be closed")
+                        }
                         close()
                         return@webSocket
                     }
@@ -122,7 +129,9 @@ class ChatRepository(
                                 apiClient.json.decodeFromString(AgentEvent.serializer(), text)
                             }.getOrNull() ?: continue
 
-                            trySend(event)
+                            if (trySend(event).isFailure) {
+                                PlatformLogger.w("ChatRepository", "Failed to send event: channel may be closed")
+                            }
 
                             if (event.type == "done" || event.type == "error") {
                                 break
@@ -137,7 +146,9 @@ class ChatRepository(
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            trySend(AgentEvent(type = "error", error = e.message ?: "WebSocket 连接失败"))
+            if (trySend(AgentEvent(type = "error", error = e.message ?: "WebSocket 连接失败")).isFailure) {
+                PlatformLogger.w("ChatRepository", "Failed to send event: channel may be closed")
+            }
         } finally {
             close()
         }

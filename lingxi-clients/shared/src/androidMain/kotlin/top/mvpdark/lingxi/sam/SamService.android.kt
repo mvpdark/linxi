@@ -50,7 +50,7 @@ actual class SamService actual constructor(private val context: PlatformContext)
     private var visionOutputName: String = "image_embeddings"
     private var decoderEmbeddingsName: String = "image_embeddings"
     private var decoderBoxesName: String = "input_boxes"
-    private var decoderOrigSizeName: String = "original_sizes"
+    private var decoderOrigSizeName: String? = "original_sizes"
     private var decoderReshapedSizeName: String? = null
     private var decoderOutputName: String = "pred_masks"
 
@@ -144,8 +144,12 @@ actual class SamService actual constructor(private val context: PlatformContext)
                 val origW = argbBitmap.width
                 val origH = argbBitmap.height
                 val pixels = IntArray(origW * origH)
-                argbBitmap.getPixels(pixels, 0, origW, 0, 0, origW, origH)
-                argbBitmap.recycle()
+                try {
+                    argbBitmap.getPixels(pixels, 0, origW, 0, 0, origW, origH)
+                } finally {
+                    // 确保 Bitmap 在 getPixels 成功或抛异常时都被释放，避免 native 内存泄漏
+                    if (!argbBitmap.isRecycled) argbBitmap.recycle()
+                }
 
                 // 2. 预处理：SamImageProcessor.preprocess → CHW FloatArray + 尺寸信息
                 val preprocessed = SamImageProcessor.preprocess(pixels, origW, origH)
@@ -186,23 +190,25 @@ actual class SamService actual constructor(private val context: PlatformContext)
                 )
                 resources.add(boxesTensor)
 
-                // 创建 original_sizes tensor (shape [2]，int64)
-                // 注意：部分模型可能期望 [1, 2]，如遇形状不匹配请调整此处
-                val origSizes = longArrayOf(origH.toLong(), origW.toLong())
-                // 检测模型期望的 original_sizes shape：[2] 或 [1, 2]
-                val origSizeShape = resolveOrigSizeShape(decoder, decoderOrigSizeName)
-                val origSizesTensor = OnnxTensor.createTensor(
-                    env, LongBuffer.wrap(origSizes), origSizeShape,
-                )
-                resources.add(origSizesTensor)
-
                 // 构造 decoder 输入（按模型实际需要补充 optional 输入）
                 val decoderInputs = mutableMapOf<String, OnnxTensor>(
                     decoderEmbeddingsName to embeddingsTensor,
                     decoderBoxesName to boxesTensor,
                 )
-                if (decoder.inputNames.contains(decoderOrigSizeName)) {
-                    decoderInputs[decoderOrigSizeName] = origSizesTensor
+
+                // 创建 original_sizes tensor (shape [2]，int64)，仅当模型实际声明该输入时才创建，
+                // 避免模型无此输入时无谓分配 tensor 浪费内存。
+                // 注意：部分模型可能期望 [1, 2]，如遇形状不匹配请调整此处
+                val origSizeName = decoderOrigSizeName
+                if (origSizeName != null && decoder.inputNames.contains(origSizeName)) {
+                    val origSizes = longArrayOf(origH.toLong(), origW.toLong())
+                    // 检测模型期望的 original_sizes shape：[2] 或 [1, 2]
+                    val origSizeShape = resolveOrigSizeShape(decoder, origSizeName)
+                    val origSizesTensor = OnnxTensor.createTensor(
+                        env, LongBuffer.wrap(origSizes), origSizeShape,
+                    )
+                    resources.add(origSizesTensor)
+                    decoderInputs[origSizeName] = origSizesTensor
                 }
                 // 部分模型还需要 reshaped_input_sizes（resize 后的 [H, W]）
                 decoderReshapedSizeName?.let { name ->
@@ -280,7 +286,8 @@ actual class SamService actual constructor(private val context: PlatformContext)
                 SamSegmentResult(success = true, objects = results)
             } catch (e: Exception) {
                 Log.e(TAG, "segment failed", e)
-                SamSegmentResult(success = false, error = e.message ?: "分割失败")
+                val errorType = e::class.simpleName ?: "Exception"
+                SamSegmentResult(success = false, error = "[$errorType] ${e.message ?: "分割失败"}")
             } finally {
                 // 逆序关闭：先关 decoder 结果（释放 pred_masks），
                 // 再关输入张量，最后关 vision 结果（释放 embeddings）
@@ -317,8 +324,17 @@ actual class SamService actual constructor(private val context: PlatformContext)
                 .onFailure { Log.w(TAG, "NNAPI 不可用，回退 XNNPACK: ${it.message}") }
                 .isSuccess
             if (!nnapiOk) {
-                runCatching { opts.addXnnpack(emptyMap()) }
+                // NNAPI 失败后 opts 可能已被部分污染（如注册了失败的 EP），
+                // 重新创建干净的 SessionOptions 再走 XNNPACK，避免复用污染的 options。
+                runCatching { opts.close() }
+                val freshOpts = OrtSession.SessionOptions()
+                freshOpts.setOptimizationLevel(OrtSession.SessionOptions.OptLevel.ALL_OPT)
+                freshOpts.setIntraOpNumThreads(
+                    Runtime.getRuntime().availableProcessors().coerceAtMost(4),
+                )
+                runCatching { freshOpts.addXnnpack(emptyMap()) }
                     .onFailure { Log.w(TAG, "XNNPACK 不可用: ${it.message}") }
+                return freshOpts
             }
         } else {
             runCatching { opts.addXnnpack(emptyMap()) }
@@ -397,7 +413,8 @@ actual class SamService actual constructor(private val context: PlatformContext)
         decoderOrigSizeName = inputs.firstOrNull { it in DECODER_ORIG_SIZE_CANDIDATES }
             ?: inputs.firstOrNull { it.contains("orig", ignoreCase = true) }
             ?: inputs.firstOrNull { it.contains("size", ignoreCase = true) }
-            ?: inputs.last()
+        // 不再盲目回退到 inputs.last()，避免把无关输入误判为 original_sizes；
+        // 若模型未声明 original_sizes 类输入，则保持 null，下方按需条件创建 tensor。
 
         decoderReshapedSizeName = inputs.firstOrNull {
             it.contains("reshaped", ignoreCase = true)

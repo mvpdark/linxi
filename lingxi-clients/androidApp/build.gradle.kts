@@ -22,7 +22,6 @@ kotlin {
             implementation(libs.androidx.activity.compose)
             implementation(libs.androidx.core.ktx)
             implementation(libs.koin.core)
-            implementation(libs.koin.android)
             implementation(libs.koin.compose)
             implementation(libs.koin.compose.viewmodel)
         }
@@ -64,7 +63,7 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -81,4 +80,7 @@ android {
 
 dependencies {
     debugImplementation(compose.uiTooling)
+
+    testImplementation(libs.kotlin.test)
+    androidTestImplementation(libs.kotlin.test)
 }

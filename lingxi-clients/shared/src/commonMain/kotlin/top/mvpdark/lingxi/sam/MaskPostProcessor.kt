@@ -3,6 +3,7 @@ package top.mvpdark.lingxi.sam
 import kotlin.math.abs
 import kotlin.math.floor
 import kotlin.math.sqrt
+import kotlin.time.TimeSource
 
 /**
  * SAM Mask 后处理器（纯 Kotlin 实现）。
@@ -43,7 +44,8 @@ object MaskPostProcessor {
         if (mask.isEmpty() || width <= 0 || height <= 0) return null
 
         // 1. 8-连通域 BFS 标记，找最大连通域
-        val labels = IntArray(width * height)
+        // 使用 ShortArray 节省内存（标签数远小于 32767）；连通域数量极少会超过 Short.MAX_VALUE。
+        val labels = ShortArray(width * height)
         var nextLabel = 1
         var maxLabel = 0
         var maxSize = 0
@@ -55,7 +57,7 @@ object MaskPostProcessor {
                 // BFS 标记新连通域
                 val queue = ArrayDeque<Int>()
                 queue.addLast(idx)
-                labels[idx] = nextLabel
+                labels[idx] = nextLabel.toShort()
                 var size = 1
                 while (queue.isNotEmpty()) {
                     val cur = queue.removeFirst()
@@ -66,7 +68,7 @@ object MaskPostProcessor {
                             if (nx == cx && ny == cy) continue
                             val nIdx = ny * width + nx
                             if (mask[nIdx] > 0 && labels[nIdx] == 0) {
-                                labels[nIdx] = nextLabel
+                                labels[nIdx] = nextLabel.toShort()
                                 queue.addLast(nIdx)
                                 size++
                             }
@@ -103,7 +105,7 @@ object MaskPostProcessor {
 
         // 4. 计算周长 & Douglas-Peucker 简化（epsilon = 周长 × 0.005）
         val perimeter = computePerimeter(contour)
-        val epsilon = perimeter * 0.005f
+        val epsilon = maxOf(perimeter * 0.005f, 1.0f)
         val simplified = if (epsilon > 0f) {
             douglasPeucker(contour, epsilon)
         } else {
@@ -112,6 +114,8 @@ object MaskPostProcessor {
         if (simplified.size < 3) return null
 
         // 5. 限制点数
+        // TODO: 改用 Douglas-Peucker 动态简化（按 maxPoints 自适应放大 epsilon），
+        //       当前均匀降采样可能丢失关键拐点，但实现简单且对多数 mask 影响有限。
         var result = simplified
         if (result.size > maxPoints) {
             val step = (result.size + maxPoints - 1) / maxPoints
@@ -143,7 +147,7 @@ object MaskPostProcessor {
      * @return 轮廓点列表 [(x, y), ...]，像素坐标
      */
     private fun mooreNeighborTrace(
-        labels: IntArray,
+        labels: ShortArray,
         targetLabel: Int,
         width: Int,
         height: Int,
@@ -157,9 +161,14 @@ object MaskPostProcessor {
         var cy = startY
         var dir = 0 // 初始搜索方向（East）
         val maxSteps = width * height * 4 // 防止无限循环
+        // 时间超时保护：避免极端 mask 触发超长轮廓追踪导致 UI 卡顿
+        // （commonMain 用 TimeSource.Monotonic，Kotlin 1.9+ 稳定可用）
+        val startTimeMark = TimeSource.Monotonic.markNow()
+        val timeoutMs = 2000L
 
         var step = 0
         while (step < maxSteps) {
+            if (startTimeMark.elapsedNow().inWholeMilliseconds > timeoutMs) break
             val curIdx = cy * width + cx
             // 回到已访问像素则终止（Jacob's stopping criterion）
             if (step > 0 && visited[curIdx]) break
@@ -259,7 +268,7 @@ object MaskPostProcessor {
         val dx = endX - startX
         val dy = endY - startY
         val lenSq = dx * dx + dy * dy
-        if (lenSq == 0f) {
+        if (lenSq < 1e-10f) {
             val ddx = point.first - startX
             val ddy = point.second - startY
             return sqrt(ddx * ddx + ddy * ddy)
