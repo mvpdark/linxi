@@ -458,16 +458,19 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          VERSION="v1.0.${{ github.run_number }}"
+
           # 删除旧的 latest release（如果存在）
           gh release delete latest --yes --cleanup-tag 2>/dev/null || true
 
-          # 创建新的 latest release
+          # 创建新的 latest release（tag 固定为 latest，标题带版本号）
           gh release create latest \
-            --title "灵犀 - 最新版本" \
-            --notes "## 灵犀 最新版本
+            --title "灵犀 ${VERSION}" \
+            --notes "## 灵犀 ${VERSION}
 
           **Commit:** ${{ github.sha }}
           **构建时间:** $(date -u '+%Y-%m-%d %H:%M UTC')
+          **版本号:** ${VERSION}
 
           ### 下载说明
           - **Android**: 下载 \`lingxi-android.apk\`
