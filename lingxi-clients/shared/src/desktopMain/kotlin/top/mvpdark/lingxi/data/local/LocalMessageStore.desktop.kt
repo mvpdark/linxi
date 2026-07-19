@@ -91,7 +91,8 @@ actual class LocalMessageStore actual constructor(context: PlatformContext) {
 
     actual suspend fun resolveImage(localPath: String): ByteArray? {
         return withContext(Dispatchers.IO) {
-            val path = localPath.removePrefix("file://")
+            // 兼容 file:///C:/... （三斜杠）和 file://C:/... （两斜杠）
+            val path = localPath.removePrefix("file:///").removePrefix("file://")
             val file = File(path)
             if (file.exists()) file.readBytes() else null
         }

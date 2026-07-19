@@ -283,11 +283,21 @@ class ChatViewModel(
             // 用户消息保存到本地存储
             runCatching { localMessageStore.saveMessage(currentSessionId, userMessage) }
 
-            // 流式接收 AgentEvent
-            chatRepository.sendMessageStream(currentSessionId, pendingText, pendingImage)
-                .collect { event: AgentEvent ->
-                    handleAgentEvent(currentSessionId, event)
+            // 流式接收 AgentEvent（含异常保护，防止崩溃和 isSending 卡死）
+            try {
+                chatRepository.sendMessageStream(currentSessionId, pendingText, pendingImage)
+                    .collect { event: AgentEvent ->
+                        handleAgentEvent(currentSessionId, event)
+                    }
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                _uiState.update {
+                    it.copy(
+                        error = "发送失败: ${e.message}",
+                        emojiState = EmojiState.IDLE,
+                    )
                 }
+            }
             // 流结束：如果表情仍在思考/工作状态，回 idle
             _uiState.update {
                 if (it.emojiState == EmojiState.THINKING || it.emojiState == EmojiState.WORKING) {

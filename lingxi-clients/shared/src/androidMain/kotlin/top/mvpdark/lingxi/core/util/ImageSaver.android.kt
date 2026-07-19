@@ -26,7 +26,7 @@ import top.mvpdark.lingxi.core.network.PlatformContext
  *   需要 WRITE_EXTERNAL_STORAGE 权限（Manifest 中以 maxSdkVersion=28 声明），
  *   未授权时返回失败信息而不是抛异常崩溃。
  */
-actual class ImageSaver(private val context: PlatformContext) {
+actual class ImageSaver actual constructor(private val context: PlatformContext) {
 
     actual suspend fun saveImage(imageUrl: String, suggestedName: String): Result<String> =
         withContext(Dispatchers.IO) {
