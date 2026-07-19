@@ -37,10 +37,16 @@ compose.desktop {
         }
 
         nativeDistributions {
-            targetFormats(TargetFormat.Msi, TargetFormat.Exe)
+            // Windows: Msi + Exe（在 Windows runner 上构建）
+            // macOS: Dmg（在 macOS runner 上构建，不能交叉编译）
+            // Linux 上运行 packageDmg 会自动跳过
+            targetFormats(TargetFormat.Msi, TargetFormat.Exe, TargetFormat.Dmg)
             packageName = "Lingxi"
             // 版本号：优先从环境变量读取（CI 注入），本地默认 1.0.0
             packageVersion = System.getenv("LINGXI_VERSION_NAME") ?: "1.0.0"
+            description = "灵犀 AI 助手"
+            copyright = "© 2026 mvpdark. All rights reserved."
+            vendor = "mvpdark"
 
             windows {
                 menuGroup = "Lingxi"
@@ -48,7 +54,22 @@ compose.desktop {
                 jvmArgs += listOf("-Xmx2g", "-Dfile.encoding=UTF-8")
             }
 
+            macOS {
+                bundleID = "top.mvpdark.lingxi"
+                dockName = "灵犀"
+                // 最低系统版本 11.0（Big Sur），同时支持 Intel 和 Apple Silicon
+                minimumSystemVersion = "11.0"
+                jvmArgs += listOf("-Xmx2g", "-Dfile.encoding=UTF-8")
+                // 构建号（CFBundleVersion），与 packageVersion 分开
+                packageBuildVersion = System.getenv("LINGXI_VERSION_NAME") ?: "1.0.0"
+            }
+
             // 通用配置
+            // 资源按 OS/架构自动分发：
+            //   resources/common/         → 所有平台
+            //   resources/macos-arm64/    → Apple Silicon 专属
+            //   resources/macos-x64/      → Intel 专属
+            //   resources/windows-x64/    → Windows 专属
             appResourcesRootDir.set(project.layout.projectDirectory.dir("resources"))
         }
     }
