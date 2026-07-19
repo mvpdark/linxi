@@ -288,6 +288,7 @@ jobs:
 
   build-desktop-macos-intel:
     name: Build Desktop DMG (Intel)
+    if: false  # 暂时禁用 Intel DMG，macos-13 runner 资源紧张排队过久
     runs-on: macos-13
     env:
       LINGXI_VERSION_NAME: "1.0.${{ github.run_number }}"
@@ -400,7 +401,7 @@ jobs:
 
   release:
     name: Publish to GitHub Releases
-    needs: [build-android, build-desktop, build-desktop-macos-arm64, build-desktop-macos-intel]
+    needs: [build-android, build-desktop, build-desktop-macos-arm64]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
@@ -493,9 +494,8 @@ jobs:
           - **Windows 安装版**: 下载 \`lingxi-desktop-v1.0.${{ github.run_number }}.msi\`，双击安装
           - **Windows 便携版**: 下载 \`lingxi-desktop-portable-v1.0.${{ github.run_number }}.exe\`，无需安装直接运行
           - **macOS Apple Silicon (M1/M2/M3/M4)**: 下载 \`lingxi-desktop-macos-arm64-v1.0.${{ github.run_number }}.dmg\`
-          - **macOS Intel**: 下载 \`lingxi-desktop-macos-x64-v1.0.${{ github.run_number }}.dmg\`
-          - **iOS Framework**: 下载 \`lingxi-ios-framework-v1.0.${{ github.run_number }}.zip\`，解压后导入 Xcode 项目（P0 阶段为 framework，需手动创建 Xcode wrapper 工程）
 
           > 如已安装旧版本，可直接覆盖安装（签名一致）。
-          > macOS 用户首次打开可能需要右键选择「打开」以绕过 Gatekeeper。" \
+          > macOS 用户首次打开可能需要右键选择「打开」以绕过 Gatekeeper。
+          > Intel Mac 和 iOS 暂未提供，后续版本支持。" \
             release-assets/*
