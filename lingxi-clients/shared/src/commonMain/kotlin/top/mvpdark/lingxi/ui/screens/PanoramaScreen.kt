@@ -46,6 +46,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import org.koin.compose.viewmodel.koinViewModel
+import top.mvpdark.lingxi.ui.components.PanoramaViewer
 import top.mvpdark.lingxi.ui.imageedit.rememberImagePickerLauncher
 import top.mvpdark.lingxi.ui.panorama.PanoramaViewModel
 
@@ -337,28 +338,19 @@ private fun ResultContent(
             )
         }
         item {
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                ),
-            ) {
-                state.resultUrl?.let { url ->
-                    AsyncImage(
-                        model = url,
-                        contentDescription = "全景图",
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(16.dp)),
-                        contentScale = ContentScale.Fit,
-                    )
-                }
+            // 360° 全景查看器：支持拖拽浏览 + 双指缩放
+            state.resultUrl?.let { url ->
+                PanoramaViewer(
+                    imageUrl = url,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(280.dp),
+                )
             }
         }
         item {
             Text(
-                text = "提示：全景图为 2:1 equirectangular 格式，可在全景查看器中 360 度浏览",
+                text = "👆 拖动画面查看 360° 视角，双指缩放调整远近",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

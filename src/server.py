@@ -902,7 +902,7 @@ async def upload_image(request: Request, file: UploadFile = File(...)):
     # 架构改造：返回 base64 data URL，不再写 WebDAV/assets
     b64 = base64.b64encode(content).decode("utf-8")
     img_id = f"upl_{uuid.uuid4().hex[:12]}"
-    return {"image": f"data:image/jpeg;base64,{b64}", "id": img_id}
+    return {"success": True, "image": f"data:image/jpeg;base64,{b64}", "id": img_id}
 
 
 # === REST API: 记忆管理 ===

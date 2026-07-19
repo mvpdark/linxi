@@ -44,12 +44,15 @@ class ImageEditRepository(
      */
     suspend fun uploadImage(bytes: ByteArray, fileName: String): UploadResponse {
         return runCatchingCancellable {
-            apiClient.httpClient.submitFormWithBinaryData(
+            val resp = apiClient.httpClient.submitFormWithBinaryData(
                 url = "/api/upload",
                 formData = formData {
                     appendFile("file", bytes, fileName)
                 },
             ).body<UploadResponse>()
+            // 容错：后端 /api/upload 旧版本不返回 success 字段，
+            // 以 image 非空作为成功依据（与 Web 端 image-edit.js 对齐）
+            if (resp.image.isNotEmpty() && !resp.success) resp.copy(success = true) else resp
         }.getOrElse { e ->
             PlatformLogger.e("ImageEditRepository", "uploadImage failed", e)
             UploadResponse(success = false, error = e.toUserMessage())
