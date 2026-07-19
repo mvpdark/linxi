@@ -482,14 +482,13 @@ class ChatViewModel(
         _uiState.update { it.copy(error = null) }
     }
 
-    /** 删除会话。 */
+    /** 删除会话（同时清理后端和本地存储）。 */
     fun deleteSession(sessionId: String) {
         viewModelScope.launch {
-            val result: Result<Unit> = runCatching { chatRepository.deleteSession(sessionId) }
-            result.onSuccess {
-                _uiState.update {
-                    it.copy(sessions = it.sessions.filterNot { s -> s.id == sessionId })
-                }
+            runCatching { chatRepository.deleteSession(sessionId) }
+            runCatching { localMessageStore.deleteSessionMessages(sessionId) }
+            _uiState.update {
+                it.copy(sessions = it.sessions.filterNot { s -> s.id == sessionId })
             }
         }
     }

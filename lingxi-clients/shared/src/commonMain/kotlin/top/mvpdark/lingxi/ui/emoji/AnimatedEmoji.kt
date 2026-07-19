@@ -18,8 +18,8 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
-import org.jetbrains.compose.resources.InternalResourceApi
-import org.jetbrains.compose.resources.readResourceBytes
+import lingxi_clients.shared.generated.resources.Res
+import lingxi_clients.shared.generated.resources.readBytes
 import top.mvpdark.lingxi.core.util.PlatformLogger
 
 /**
@@ -37,7 +37,6 @@ import top.mvpdark.lingxi.core.util.PlatformLogger
  * @param modifier 修饰符。
  * @param size 表情尺寸（正方形）。
  */
-@OptIn(InternalResourceApi::class)
 @Composable
 fun AnimatedEmoji(
     resourcePath: String,
@@ -48,7 +47,7 @@ fun AnimatedEmoji(
     val apngState = produceState<ApngParser.ApngData?>(initialValue = null, resourcePath) {
         value = withContext(Dispatchers.Default) {
             try {
-                val bytes = readResourceBytes(resourcePath)
+                val bytes = Res.readBytes(resourcePath)
                 ApngParser().parse(bytes)
             } catch (e: Exception) {
                 PlatformLogger.e("AnimatedEmoji", "APNG 解析失败: $resourcePath", e)

@@ -35,8 +35,8 @@ import coil3.compose.AsyncImagePainter
 import coil3.compose.rememberAsyncImagePainter
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import org.jetbrains.compose.resources.InternalResourceApi
-import org.jetbrains.compose.resources.readResourceBytes
+import lingxi_clients.shared.generated.resources.Res
+import lingxi_clients.shared.generated.resources.readBytes
 import top.mvpdark.lingxi.core.util.PlatformLogger
 import java.awt.Desktop
 import java.io.File
@@ -61,7 +61,6 @@ import java.util.Base64
  * @param imageUrl 全景图 URL（data URL 或 http URL）
  * @param modifier 修饰符
  */
-@OptIn(InternalResourceApi::class)
 @Composable
 actual fun PanoramaViewer(
     imageUrl: String,
@@ -185,7 +184,6 @@ actual fun PanoramaViewer(
  * 关键：pannellum.js 作为独立文件写入，不内联到 Kotlin 模板字符串，
  * 避免 $a 等 JS 变量名被 Kotlin 解析为模板表达式。
  */
-@OptIn(InternalResourceApi::class)
 private suspend fun preparePanoramaFiles(imageUrl: String): File {
     // 1. 创建临时目录
     val dir = File(System.getProperty("java.io.tmpdir"), "panorama_${System.currentTimeMillis()}")
@@ -201,11 +199,11 @@ private suspend fun preparePanoramaFiles(imageUrl: String): File {
     })
 
     // 2. 写入 pannellum.js（独立文件，不内联）
-    val jsBytes = readResourceBytes("files/panorama/pannellum.js")
+    val jsBytes = Res.readBytes("files/panorama/pannellum.js")
     File(dir, "pannellum.js").writeBytes(jsBytes)
 
     // 3. 写入 pannellum.css
-    val cssBytes = readResourceBytes("files/panorama/pannellum.css")
+    val cssBytes = Res.readBytes("files/panorama/pannellum.css")
     File(dir, "pannellum.css").writeBytes(cssBytes)
 
     // 4. 读取全景图字节并转 base64，写入 panorama_data.js

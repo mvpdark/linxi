@@ -15,6 +15,7 @@ object UrlResolver {
      * 解析图片地址：
      * - `data:` 开头（Base64 / SVG data URL）原样返回；
      * - `http://` / `https://` 开头原样返回；
+     * - `file://` 开头（本地缓存文件）原样返回；
      * - 以 `/` 开头的相对路径，前缀拼接 [BASE_URL]；
      * - 其余无前导斜杠的相对路径，补充一个 `/` 后拼接 [BASE_URL]；
      * - 空串原样返回。
@@ -23,6 +24,7 @@ object UrlResolver {
         if (path.isBlank()) return path
         if (path.startsWith("data:")) return path
         if (path.startsWith("http://") || path.startsWith("https://")) return path
+        if (path.startsWith("file://")) return path
         return if (path.startsWith("/")) {
             "$BASE_URL$path"
         } else {

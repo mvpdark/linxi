@@ -25,8 +25,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import org.jetbrains.compose.resources.InternalResourceApi
-import org.jetbrains.compose.resources.readResourceBytes
+import lingxi_clients.shared.generated.resources.Res
+import lingxi_clients.shared.generated.resources.readBytes
 import java.io.File
 
 /**
@@ -44,7 +44,6 @@ import java.io.File
  * - blob: URL 是同源的，XHR 可以可靠加载，彻底解决问题
  */
 @SuppressLint("SetJavaScriptEnabled")
-@OptIn(InternalResourceApi::class)
 @Composable
 actual fun PanoramaViewer(
     imageUrl: String,
@@ -68,11 +67,11 @@ actual fun PanoramaViewer(
                 dir.mkdirs()
 
                 // 1. 写入 pannellum.js
-                val jsBytes = readResourceBytes("files/panorama/pannellum.js")
+                val jsBytes = Res.readBytes("files/panorama/pannellum.js")
                 File(dir, "pannellum.js").writeBytes(jsBytes)
 
                 // 2. 写入 pannellum.css
-                val cssBytes = readResourceBytes("files/panorama/pannellum.css")
+                val cssBytes = Res.readBytes("files/panorama/pannellum.css")
                 File(dir, "pannellum.css").writeBytes(cssBytes)
 
                 // 3. 读取全景图字节并转 base64
@@ -109,7 +108,7 @@ actual fun PanoramaViewer(
                 File(dir, "panorama_data.js").writeText(dataJs)
 
                 // 5. 写入 index.html（直接使用模板，HTML 内置自动加载逻辑）
-                val htmlTemplate = readResourceBytes("files/panorama/panorama_viewer.html").decodeToString()
+                val htmlTemplate = Res.readBytes("files/panorama/panorama_viewer.html").decodeToString()
                 File(dir, "index.html").writeText(htmlTemplate)
 
                 "file://${dir.absolutePath}/index.html"
