@@ -12,6 +12,9 @@ import top.mvpdark.lingxi.data.model.ChatMessage
 import top.mvpdark.lingxi.data.model.ChatSession
 import top.mvpdark.lingxi.core.util.currentTimeMillis
 import top.mvpdark.lingxi.data.repository.ChatRepository
+import top.mvpdark.lingxi.ui.emoji.EmojiState
+import top.mvpdark.lingxi.ui.emoji.chooseDoneEmoji
+import kotlinx.coroutines.delay
 
 /**
  * 聊天 UI 状态。
@@ -28,6 +31,8 @@ data class ChatUiState(
     val isSending: Boolean = false,
     val isSessionsPanelOpen: Boolean = false,
     val error: String? = null,
+    /** 团团表情状态（APNG 动画）。 */
+    val emojiState: EmojiState = EmojiState.IDLE,
 )
 
 /**
@@ -146,6 +151,7 @@ class ChatViewModel(
                 agentStatus = "团团思考中...",
                 agentEvents = emptyList(),
                 error = null,
+                emojiState = EmojiState.THINKING,
             )
         }
 
@@ -171,6 +177,7 @@ class ChatViewModel(
                         isSending = false,
                         agentStatus = null,
                         error = "没有可用会话，请稍后重试",
+                        emojiState = EmojiState.IDLE,
                     )
                 }
                 return@launch
@@ -199,7 +206,14 @@ class ChatViewModel(
                 .collect { event: AgentEvent ->
                     handleAgentEvent(currentSessionId, event)
                 }
-            _uiState.update { it.copy(isSending = false, agentStatus = null) }
+            // 流结束：如果表情仍在思考/工作状态，回 idle
+            _uiState.update {
+                if (it.emojiState == EmojiState.THINKING || it.emojiState == EmojiState.WORKING) {
+                    it.copy(isSending = false, agentStatus = null, emojiState = EmojiState.IDLE)
+                } else {
+                    it.copy(isSending = false, agentStatus = null)
+                }
+            }
         }
     }
 
@@ -208,12 +222,20 @@ class ChatViewModel(
         when (event.type) {
             "auth_ok" -> Unit
             "routing" -> {
-                _uiState.update { it.copy(agentStatus = "团团正在理解你的需求...") }
+                _uiState.update {
+                    it.copy(
+                        agentStatus = "团团正在理解你的需求...",
+                        emojiState = EmojiState.THINKING,
+                    )
+                }
             }
             "dispatch" -> {
                 val agents = event.agentsDispatched.joinToString("、").ifBlank { "团团" }
                 _uiState.update {
-                    it.copy(agentStatus = "团团派出了：$agents")
+                    it.copy(
+                        agentStatus = "团团派出了：$agents",
+                        emojiState = EmojiState.WORKING,
+                    )
                 }
             }
             "status" -> {
@@ -222,7 +244,12 @@ class ChatViewModel(
                 }
             }
             "synthesis_start" -> {
-                _uiState.update { it.copy(agentStatus = "团团整理回答中...") }
+                _uiState.update {
+                    it.copy(
+                        agentStatus = "团团整理回答中...",
+                        emojiState = EmojiState.WORKING,
+                    )
+                }
             }
             "agent_done" -> {
                 val msg = "${event.agentName}完成"
@@ -271,6 +298,9 @@ class ChatViewModel(
                         )
                     }
                 }
+                // 智能选择完成表情，3 秒后自动回 idle
+                val doneEmoji = chooseDoneEmoji(fullText)
+                setEmojiWithAutoRevert(doneEmoji)
             }
             "error" -> {
                 _uiState.update {
@@ -280,8 +310,26 @@ class ChatViewModel(
                         error = event.error.ifBlank { event.content.ifBlank { "团团开小差了" } },
                     )
                 }
+                // 出错：显示道歉表情，3 秒后自动回 idle
+                setEmojiWithAutoRevert(EmojiState.APOLOGIZING)
             }
             else -> Unit
+        }
+    }
+
+    /**
+     * 设置表情状态，happy/apologizing 3 秒后自动回 idle。
+     */
+    private fun setEmojiWithAutoRevert(state: EmojiState) {
+        _uiState.update { it.copy(emojiState = state) }
+        if (state == EmojiState.HAPPY || state == EmojiState.APOLOGIZING) {
+            viewModelScope.launch {
+                delay(3000)
+                // 仅当仍处于同一状态时才回退
+                if (_uiState.value.emojiState == state) {
+                    _uiState.update { it.copy(emojiState = EmojiState.IDLE) }
+                }
+            }
         }
     }
 

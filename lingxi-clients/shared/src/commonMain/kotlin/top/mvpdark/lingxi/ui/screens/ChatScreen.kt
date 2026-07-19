@@ -61,6 +61,8 @@ import top.mvpdark.lingxi.core.util.formatSessionTime
 import top.mvpdark.lingxi.data.model.ChatMessage
 import top.mvpdark.lingxi.ui.chat.ChatViewModel
 import top.mvpdark.lingxi.ui.components.ChatBubble
+import top.mvpdark.lingxi.ui.emoji.AnimatedEmoji
+import top.mvpdark.lingxi.ui.emoji.EmojiState
 
 /**
  * 聊天页面（核心页面）。
@@ -172,17 +174,18 @@ fun ChatScreen(
                             )
                         }
 
-                        // Agent 状态卡片
+                        // Agent 状态卡片（团团表情 + 状态文字）
                         if (state.agentStatus != null && state.streamingText.isEmpty()) {
                             item {
                                 AgentStatusCard(
                                     status = state.agentStatus!!,
                                     events = state.agentEvents,
+                                    emojiState = state.emojiState,
                                 )
                             }
                         }
 
-                        // 流式回复气泡（实时追加）
+                        // 流式回复气泡（实时追加 + 团团表情）
                         if (state.streamingText.isNotEmpty()) {
                             item {
                                 Column {
@@ -194,6 +197,13 @@ fun ChatScreen(
                                         TypingIndicator()
                                     }
                                 }
+                            }
+                        }
+
+                        // 发送中但还没开始流式回复：显示团团表情
+                        if (state.isSending && state.streamingText.isEmpty() && state.agentStatus == null) {
+                            item {
+                                EmojiDisplayRow(emojiState = state.emojiState)
                             }
                         }
                     }
@@ -302,12 +312,13 @@ private fun SessionSidebar(
 }
 
 /**
- * Agent 状态卡片：显示 routing/dispatch/agent_done 等执行过程。
+ * Agent 状态卡片：显示团团 APNG 表情 + routing/dispatch/agent_done 等执行过程。
  */
 @Composable
 private fun AgentStatusCard(
     status: String,
     events: List<top.mvpdark.lingxi.data.model.AgentEvent>,
+    emojiState: EmojiState = EmojiState.THINKING,
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -320,10 +331,10 @@ private fun AgentStatusCard(
             modifier = Modifier.padding(12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            CircularProgressIndicator(
-                modifier = Modifier.size(18.dp),
-                strokeWidth = 2.dp,
-                color = MaterialTheme.colorScheme.primary,
+            // 团团 APNG 动画表情
+            AnimatedEmoji(
+                resourcePath = emojiState.resourcePath,
+                size = 40.dp,
             )
             Spacer(Modifier.width(12.dp))
             Column {
@@ -341,6 +352,27 @@ private fun AgentStatusCard(
                 }
             }
         }
+    }
+}
+
+/**
+ * 表情显示行（无状态文字时仅显示团团表情）。
+ */
+@Composable
+private fun EmojiDisplayRow(
+    emojiState: EmojiState = EmojiState.IDLE,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 8.dp),
+        horizontalArrangement = Arrangement.Start,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        AnimatedEmoji(
+            resourcePath = emojiState.resourcePath,
+            size = 48.dp,
+        )
     }
 }
 
@@ -377,7 +409,7 @@ private fun TypingIndicator() {
 }
 
 /**
- * 空会话提示。
+ * 空会话提示（团团 idle 表情 + 欢迎语）。
  */
 @Composable
 private fun EmptyChatHint() {
@@ -387,9 +419,10 @@ private fun EmptyChatHint() {
             .padding(top = 60.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Text(
-            text = "(=^･ω･^=)",
-            style = MaterialTheme.typography.headlineMedium,
+        // 团团 idle 动画表情
+        AnimatedEmoji(
+            resourcePath = EmojiState.IDLE.resourcePath,
+            size = 80.dp,
         )
         Spacer(Modifier.height(12.dp))
         Text(
