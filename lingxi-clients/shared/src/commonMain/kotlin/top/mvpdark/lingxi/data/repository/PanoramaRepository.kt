@@ -21,7 +21,9 @@ data class PanoramaResponse(
     val image: String = "",
     val id: String = "",
     val error: String = "",
-    val success: Boolean = true,
+    // 后端不下发 success 字段（契约恒为 {image, id}）；仅客户端失败兜底路径
+    // 显式构造 success=false。成功判定以 image 非空为准，禁止依赖本字段
+    val success: Boolean = false,
 )
 
 /**

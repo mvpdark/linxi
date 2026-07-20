@@ -70,6 +70,6 @@ val appModule = module {
     viewModel { AuthViewModel(get()) }
     viewModel { ChatViewModel(get(), get(), get()) }
     viewModel { ImageEditViewModel(get(), get()) }
-    viewModel { PanoramaViewModel(get()) }
+    viewModel { PanoramaViewModel(get(), get()) }
     viewModel { UpdateViewModel(get()) }
 }

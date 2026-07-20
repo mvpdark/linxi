@@ -1690,8 +1690,12 @@ async def panorama_generate_faces(
 
     # 注意：平面图当前仅用于触发生成，内容未传给 AI
     # 保存平面图（当前仅作为触发条件，图像内容未传给生成模型）
-    plan_content = await floor_plan.read()
-    plan_content = compress_image(plan_content, max_size=1024)
+    plan_content = await read_validated_image(floor_plan)
+    try:
+        plan_content = compress_image(plan_content, max_size=1024)
+    except ValueError as ex:
+        await _refund_on_failure(user_id, _charged)
+        raise HTTPException(status_code=400, detail=str(ex))
 
     # 6个面的提示词
     face_prompts = [
@@ -1768,8 +1772,12 @@ async def panorama_ai_generate(
     if not _bal_ok:
         return _bal_err
 
-    plan_content = await floor_plan.read()
-    plan_content = compress_image(plan_content, max_size=1024)
+    plan_content = await read_validated_image(floor_plan)
+    try:
+        plan_content = compress_image(plan_content, max_size=1024)
+    except ValueError as ex:
+        await _refund_on_failure(user_id, _charged)
+        raise HTTPException(status_code=400, detail=str(ex))
 
     # 构建全景图 prompt（增强版：加入构图、光影、材质细节 + negative prompt）
     pano_prompt = (

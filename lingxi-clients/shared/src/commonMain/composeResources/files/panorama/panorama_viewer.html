@@ -27,9 +27,13 @@ html, body { width: 100%; height: 100%; overflow: hidden; background: #000; }
 <div id="viewer"></div>
 <div class="hint" id="hint">拖动画面查看 360 视角</div>
 <!--
-  panorama_data.js 由 Kotlin 侧生成，仅包含图片相对路径：
-    window.__panoramaConfig = {"url":"panorama.jpg"};
-  注意：不再内嵌 base64 大图（旧方案在低端机上 atob+逐字节转换会瞬时放大 4~5 倍内存）。
+  双平台加载机制：
+  - Android：本文件仅作模板，Kotlin 侧将下方三处外部引用原位替换为内联内容
+    （CSS / window.__panoramaConfig={url:"data:..."} / pannellum.js），
+    经 loadDataWithBaseURL 一次性加载自包含 HTML，加载后零网络/文件请求。
+  - Desktop：Kotlin 侧把本文件 + pannellum.js/css + panorama.jpg 写入临时目录，
+    并生成 panorama_data.js（仅一行 window.__panoramaConfig={url:"panorama.jpg"}），
+    JCEF 以 file:// + --allow-file-access-from-files 加载，相对路径取图。
   加载顺序必须是 panorama_data.js 在前、pannellum.js 在后、内联脚本最后。
 -->
 <script src="panorama_data.js"></script>
@@ -77,9 +81,9 @@ function hideHint() {
 }
 
 /* ---------- 加载全景图 ----------
- * url 为同源相对路径（如 panorama.jpg），页面由 WebViewAssetLoader
- * 以 https://appassets.androidplatform.net/panorama/... 提供，
- * Pannellum 内部 XHR 取图与页面同源，行为在所有 WebView 版本上一致。 */
+ * url 来源取决于平台：Android 为 data: URL（Pannellum 直接用 Image 解码，
+ * 不经 XHR，无同源限制）；Desktop 为同源相对路径 panorama.jpg（Pannellum
+ * 内部 XHR 取图，file:// 下依赖 --allow-file-access-from-files）。 */
 window.__loadPanorama = function(url) {
   if (typeof pannellum === 'undefined') {
     bridgeError('全景组件加载失败（pannellum.js 未加载）');

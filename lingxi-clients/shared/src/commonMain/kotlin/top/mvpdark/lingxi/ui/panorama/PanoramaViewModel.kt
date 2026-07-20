@@ -10,6 +10,7 @@ import kotlinx.coroutines.launch
 import top.mvpdark.lingxi.core.util.EncodeUtils
 import top.mvpdark.lingxi.core.util.PlatformLogger
 import top.mvpdark.lingxi.core.util.toUserMessage
+import top.mvpdark.lingxi.data.local.ImageCacheManager
 import top.mvpdark.lingxi.data.repository.PanoramaRepository
 
 /**
@@ -31,6 +32,7 @@ data class PanoramaUiState(
  */
 class PanoramaViewModel(
     private val repository: PanoramaRepository,
+    private val imageCacheManager: ImageCacheManager,
 ) : ViewModel() {
 
     enum class Step { Upload, Edit, Generating, Result }
@@ -93,11 +95,16 @@ class PanoramaViewModel(
                     styleDesc = state.styleDesc.ifBlank { "现代北欧风格" },
                 )
 
-                if (result.success && result.image.isNotEmpty()) {
+                // 后端契约无 success 字段，以 image 非空判定成功
+                if (result.image.isNotEmpty()) {
+                    // 生成结果立即持久化：data: URL 落盘为本地文件后存 file:// 路径，
+                    // 避免大 base64 字符串常驻 UI 状态（查看器 file:// 分支成为主路径）；
+                    // 缓存失败时 cacheImages 回退原始 data URL，功能不受影响
+                    val persistedUrl = imageCacheManager.cacheImages(listOf(result.image)).first()
                     _uiState.update {
                         it.copy(
                             step = Step.Result,
-                            resultUrl = result.image,
+                            resultUrl = persistedUrl,
                             isGenerating = false,
                         )
                     }

@@ -90,12 +90,21 @@ actual class LocalMessageStore actual constructor(context: PlatformContext) {
     }
 
     actual suspend fun saveImage(url: String, bytes: ByteArray): String {
-        return withContext(Dispatchers.IO) {
-            val fileName = "${md5(url)}.jpg"
-            val file = File(imagesDir, fileName)
-            file.writeBytes(bytes)
-            // 生成合法 file:// URI（处理 Windows 反斜杠，确保 file:/// 前缀）
-            "file:///" + file.absolutePath.replace('\\', '/')
+        return mutex.withLock {
+            withContext(Dispatchers.IO) {
+                val fileName = "${md5(url)}.jpg"
+                val file = File(imagesDir, fileName)
+                // 原子写：先写临时文件再重命名，避免并发读/写或进程中断留下半截文件。
+                // renameTo 在目标已存在时可能失败（Windows），兜底为覆盖拷贝 + 删除临时文件
+                val tmpFile = File(imagesDir, "$fileName.tmp")
+                tmpFile.writeBytes(bytes)
+                if (!tmpFile.renameTo(file)) {
+                    tmpFile.copyTo(file, overwrite = true)
+                    tmpFile.delete()
+                }
+                // 生成合法 file:// URI（处理 Windows 反斜杠，确保 file:/// 前缀）
+                "file:///" + file.absolutePath.replace('\\', '/')
+            }
         }
     }
 

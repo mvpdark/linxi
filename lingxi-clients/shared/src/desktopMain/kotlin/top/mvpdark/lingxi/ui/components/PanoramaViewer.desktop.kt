@@ -40,6 +40,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import org.cef.CefApp
 import org.cef.CefClient
 import org.cef.browser.CefBrowser
@@ -74,6 +75,9 @@ import kotlin.concurrent.thread
  *    并附加 allow-file-access-from-files 等命令行开关以放开 file:// 图片加载
  * 3. 通过 SwingPanel 内嵌 CefBrowser 的 AWT UI 组件（窗口渲染模式，GPU 加速）
  * 4. CefBrowser 加载 file:/// URL，监听 CefLoadHandler 状态驱动 Compose 加载/错误 UI
+ *
+ * 平台策略：Windows / Linux 使用内嵌 JCEF；macOS 不支持 JCEF windowed
+ * 渲染（createBrowser 必失败），直接走「系统默认浏览器打开」降级方案。
  *
  * 降级策略：若 JCEF 初始化失败（原生库缺失、平台不支持等），
  * 自动回退为「系统默认浏览器打开」方案（旧行为）。
@@ -129,8 +133,26 @@ actual fun PanoramaViewer(
         // 旧 htmlFile 并把「旧全景图」降级到系统浏览器打开（内容错配）
         htmlFile = null
         try {
-            val file = withContext(Dispatchers.IO) { preparePanoramaFiles(imageUrl) }
+            // 看门狗：http 下载慢/挂起时 60 秒超时，走 catch 错误处理
+            val file = withContext(Dispatchers.IO) {
+                withTimeout(60_000) { preparePanoramaFiles(imageUrl) }
+            }
             htmlFile = file
+            // macOS 不支持 JCEF windowed 渲染（createBrowser 必失败），
+            // 跳过 ensureJcefInitialized（避免无谓的原生库提取与 25s 看门狗等待），
+            // 直接走系统浏览器降级路径
+            if (isMacOs()) {
+                runCatching { openInBrowser(file) }
+                    .onSuccess {
+                        useSystemBrowser = true
+                        browserOpened = true
+                    }
+                    .onFailure {
+                        error = "打开全景图失败: ${it.message}"
+                        status = PanoramaStatus.Error
+                    }
+                return@LaunchedEffect
+            }
             // JCEF 全局只需初始化一次；build() 线程安全且幂等（返回同一实例）。
             // 失败会抛异常 → 走 catch 降级
             withContext(Dispatchers.IO) { ensureJcefInitialized() }
@@ -165,28 +187,32 @@ actual fun PanoramaViewer(
         if (!jcefReady || useSystemBrowser) {
             // 降级到系统浏览器时（用户在错误覆盖层点击「在系统浏览器中打开」），
             // 关闭仍在后台运行的内嵌浏览器，避免 WebGL 渲染空转 + 文件句柄占用
-            // 导致临时目录无法删除
-            if (useSystemBrowser) {
-                cefBrowser?.let { runCatching { it.close(false) } }
-                cefClient?.let { runCatching { it.dispose() } }
-                cefBrowser = null
-                cefClient = null
-            }
+            // 导致临时目录无法删除。
+            // 无条件执行（不再仅限 useSystemBrowser）：切换图片时若新图 prepare
+            // 失败（jcefReady 被重置为 false），旧 CefBrowser/CefClient 也必须
+            // 关闭释放，否则永久泄漏
+            cefBrowser?.let { runCatching { it.close(true) } }
+            cefClient?.let { runCatching { it.dispose() } }
+            cefBrowser = null
+            cefClient = null
             return@LaunchedEffect
         }
         val file = htmlFile ?: return@LaunchedEffect
 
-        // 关闭旧浏览器（切换全景图时 htmlFile 变化触发）
-        cefBrowser?.let { runCatching { it.close(false) } }
+        // 关闭旧浏览器（切换全景图时 htmlFile 变化触发）。
+        // close(true) 强制关闭，跳过 beforeunload 等待，避免与随后的 dispose() 竞态
+        cefBrowser?.let { runCatching { it.close(true) } }
         cefClient?.let { runCatching { it.dispose() } }
         cefBrowser = null
         cefClient = null
 
         status = PanoramaStatus.Loading
         error = null
+        // client 提升为可空局部变量：createBrowser 抛异常时 catch 分支需 dispose 防泄漏
+        var client: CefClient? = null
         try {
             val app = CefApp.getInstance()
-            val client = app.createClient()
+            client = app.createClient()
 
             // JS 桥：CefMessageRouter 接收页面 cefQuery 调用。
             // 共享模板通过 window.AndroidBridge.onPanoramaLoaded() 回传加载完成，
@@ -228,22 +254,24 @@ actual fun PanoramaViewer(
             }, false)
             client.addMessageRouter(router)
 
-            // 监听页面加载状态：注入 AndroidBridge 垫片 + 错误处理。
+            // 监听页面加载状态：onLoadStart 尽早注入垫片 + 错误处理。
             // 回调在 CEF 线程触发，写 Compose snapshot state 线程安全。
             client.addLoadHandler(object : CefLoadHandlerAdapter() {
-                override fun onLoadingStateChange(
+                override fun onLoadStart(
                     browser: CefBrowser?,
-                    isLoading: Boolean,
-                    canGoBack: Boolean,
-                    canGoForward: Boolean,
+                    frame: CefFrame?,
+                    transitionType: org.cef.network.CefRequest.TransitionType?,
                 ) {
-                    // 页面加载完成时注入垫片。Pannellum 的 load 事件在页面 load 之后
-                    // 异步触发（纹理上传耗时），垫片注入不会错过 load 事件。
-                    // 不在此处设置 Ready（等 JS 桥 loaded 回调确保纹理上传完成）。
-                    if (!isLoading && browser != null) {
+                    // 主帧开始加载时（早于页面脚本执行与 window load 事件）注入垫片：
+                    // 页面 load 阶段同步调用的 bridgeError（WebGL 不支持 / pannellum
+                    // 缺失）才能被捕获；若等到 onLoadEnd 才注入，这些同步错误会丢失
+                    // 并退化为 25s 超时误报。
+                    // 注：当前使用的 jcefgithub fork 的 CefMessageRouterHandler 未暴露
+                    // onContextCreated 回调，onLoadStart 是该 API 下最早的注入时机
+                    if (frame?.isMain == true && browser != null) {
                         browser.executeJavaScript(
                             ANDROID_BRIDGE_SHIM_JS,
-                            browser.url ?: "about:blank",
+                            frame.url ?: "about:blank",
                             0,
                         )
                     }
@@ -254,7 +282,7 @@ actual fun PanoramaViewer(
                     frame: CefFrame?,
                     httpStatusCode: Int,
                 ) {
-                    // 主帧加载完成时也注入垫片（双保险）
+                    // 主帧加载完成时也注入垫片（onLoadStart 已注入，此处幂等兜底）
                     if (frame?.isMain == true && browser != null) {
                         browser.executeJavaScript(
                             ANDROID_BRIDGE_SHIM_JS,
@@ -286,6 +314,8 @@ actual fun PanoramaViewer(
             cefBrowser = browser
             cefClient = client
         } catch (t: Throwable) {
+            // createBrowser 失败时局部 client 未挂到 state，需在此 dispose 防泄漏
+            runCatching { client?.dispose() }
             PlatformLogger.e("PanoramaViewer", "Create JCEF browser failed", t)
             error = "初始化内嵌浏览器失败: ${t.message}"
             status = PanoramaStatus.Error
@@ -310,7 +340,8 @@ actual fun PanoramaViewer(
             val browser = cefBrowser
             val client = cefClient
             if (browser != null) {
-                runCatching { browser.close(false) }
+                // close(true) 强制关闭，跳过 beforeunload 等待，避免与随后的 dispose() 竞态
+                runCatching { browser.close(true) }
             }
             if (client != null) {
                 runCatching { client.dispose() }
@@ -330,9 +361,20 @@ actual fun PanoramaViewer(
         onDispose {
             if (panoramaDir != null) {
                 thread(isDaemon = true, name = "panorama-cleanup") {
-                    runCatching {
-                        Thread.sleep(800)
-                        panoramaDir.deleteRecursively()
+                    // 重试清理：Chromium 释放文件句柄是异步的，首次等 800ms，
+                    // 后续每次 1s，最多 6 次；仍失败打日志，由 shutdown hook 兜底
+                    var deleted = false
+                    for (attempt in 0 until 6) {
+                        runCatching { Thread.sleep(if (attempt == 0) 800L else 1000L) }
+                        deleted = runCatching { panoramaDir.deleteRecursively() }
+                            .getOrDefault(false) || !panoramaDir.exists()
+                        if (deleted) break
+                    }
+                    if (!deleted) {
+                        PlatformLogger.d(
+                            "PanoramaViewer",
+                            "临时目录清理失败（已重试 6 次），由 shutdown hook 兜底: ${panoramaDir.absolutePath}",
+                        )
                     }
                 }
             }
@@ -453,6 +495,9 @@ private object PanoramaTempDir {
         "lingxi-panorama"
     )
 
+    /** 残留目录判定阈值：mtime 超过 1 小时的 panorama_* 目录视为上次运行残留 */
+    private const val STALE_DIR_AGE_MS = 60L * 60L * 1000L
+
     fun allocateDir(): File {
         // 首次调用时注册全局唯一的 shutdown hook，删除整个父目录
         if (registered.compareAndSet(false, true)) {
@@ -460,12 +505,29 @@ private object PanoramaTempDir {
                 parentDir.deleteRecursively()
             })
         }
+        // 顺带清扫 mtime 超过 1 小时的 panorama_* 残留目录（上次运行清理失败 /
+        // 进程被杀导致 shutdown hook 未执行的残留，避免跨启动累积）
+        sweepStaleDirs()
         val dir = File(
             parentDir,
             "panorama_${System.currentTimeMillis()}_${sequence.incrementAndGet()}"
         )
         dir.mkdirs()
         return dir
+    }
+
+    private fun sweepStaleDirs() {
+        runCatching {
+            val now = System.currentTimeMillis()
+            parentDir.listFiles()?.forEach { dir ->
+                if (dir.isDirectory &&
+                    dir.name.startsWith("panorama_") &&
+                    now - dir.lastModified() > STALE_DIR_AGE_MS
+                ) {
+                    dir.deleteRecursively()
+                }
+            }
+        }
     }
 }
 
@@ -499,9 +561,12 @@ private const val PANORAMA_LOAD_TIMEOUT_MS = 25000L
  * 改用 CefMessageRouter（cefQuery）桥接：垫片把调用转为 window.cefQuery({request:'...'})，
  * Kotlin 侧 CefMessageRouterHandlerAdapter.onQuery 据此更新状态。
  *
- * 注入时机：主帧 onLoadingStateChange(!isLoading) / onLoadEnd 时执行 executeJavaScript。
- * Pannellum 的 load 事件是异步的（纹理上传完成后才触发），在页面 load 之后才回调，
- * 因此垫片注入不会错过 load 事件。
+ * 注入时机：主帧 onLoadStart（当前 jcefgithub fork 未暴露 onContextCreated，
+ * onLoadStart 是可用的最早时机，早于页面脚本执行与 window load 事件）注入，
+ * 主帧 onLoadEnd 再幂等兜底注入一次。
+ * 尽早注入的原因：页面 window load 阶段会同步调用 bridgeError
+ * （WebGL 不支持 / pannellum 缺失），load 之后才注入会丢失这些错误，
+ * 退化为 25s 超时误报。
  *
  * 幂等：垫片开头检查 window.AndroidBridge 是否已存在，已存在则跳过。
  */
@@ -641,9 +706,10 @@ private fun ensureJcefInitialized() {
         builder.setProgressHandler(ConsoleProgressHandler())
         // 窗口渲染模式（非 OSR）：启用 GPU 加速的 WebGL
         builder.getCefSettings().windowless_rendering_enabled = false
-        // file:// 页面加载同目录图片：Pannellum 以 crossOrigin='anonymous' 的
-        // Image 拉取全景图并上传 WebGL 纹理，Chromium 默认把 file:// 视为
-        // 不透明源（CORS 拦截 → 纹理被污染 → 黑屏/loadError）。
+        // file:// 页面加载同目录图片：Pannellum 通过 XHR 把全景图拉取为 Blob、
+        // 再生成 blob: URL 交给 Image 解码后上传 WebGL 纹理（blob 源纹理天然不污染）。
+        // 真正的限制在于 Chromium 默认禁止 file:// 页面发起 XHR（file:// 被视为
+        // 不透明源，XHR 直接被拦截 → 图片取不到 → 黑屏/loadError），因此需放开限制。
         // jcefgithub 官方注入命令行开关的方式是 addJcefArgs（args 经
         // CefApp.getInstance(args, settings) 传入，由 MavenCefAppHandlerAdapter
         // 委托 CefAppHandlerAdapter.onBeforeCommandLineProcessing 解析为
@@ -728,27 +794,19 @@ private suspend fun readImageBytes(imageUrl: String): ByteArray {
     return withContext(Dispatchers.IO) {
         when {
             imageUrl.startsWith("data:") -> {
-                val base64Data = imageUrl.substringAfter("base64,")
-                Base64.getDecoder().decode(base64Data)
+                // 按首个逗号切分头部与数据（容忍无 base64 标记的 data URL）；
+                // MimeDecoder 容忍数据中的空白/换行
+                val base64Data = imageUrl.substringAfter(",", "")
+                if (base64Data.isEmpty()) {
+                    throw IllegalArgumentException("非法 data URL（缺少数据部分）")
+                }
+                Base64.getMimeDecoder().decode(base64Data)
             }
             imageUrl.startsWith("file://") -> {
                 resolveFileUrl(imageUrl).readBytes()
             }
             imageUrl.startsWith("http://") || imageUrl.startsWith("https://") -> {
-                val url = URI(imageUrl).toURL()
-                val conn = url.openConnection() as java.net.HttpURLConnection
-                conn.connectTimeout = 15000
-                conn.readTimeout = 30000
-                conn.useCaches = false
-                try {
-                    val responseCode = conn.responseCode
-                    if (responseCode != java.net.HttpURLConnection.HTTP_OK) {
-                        throw java.io.IOException("HTTP $responseCode")
-                    }
-                    conn.inputStream.use { it.readBytes() }
-                } finally {
-                    conn.disconnect()
-                }
+                downloadWithRedirects(imageUrl)
             }
             else -> {
                 try {
@@ -758,6 +816,42 @@ private suspend fun readImageBytes(imageUrl: String): ByteArray {
                 }
             }
         }
+    }
+}
+
+/**
+ * 下载 http(s) 图片，手动跟随重定向（含跨协议 http→https）。
+ *
+ * HttpURLConnection 默认 instanceFollowRedirects=true 时不跟随跨协议重定向
+ * （http→https 的 301 会直接报 HTTP 301），且默认 UA（Java/xx）可能被 CDN 403，
+ * 因此关闭自动重定向、伪装浏览器 UA 并递归处理 301/302/303/307/308。
+ *
+ * @param url 当前请求 URL
+ * @param redirectsLeft 剩余允许的重定向次数（防环）
+ */
+private fun downloadWithRedirects(url: String, redirectsLeft: Int = 5): ByteArray {
+    val conn = URI(url).toURL().openConnection() as java.net.HttpURLConnection
+    conn.instanceFollowRedirects = false
+    conn.setRequestProperty("User-Agent", "Mozilla/5.0 LingxiDesktop/1.0")
+    conn.connectTimeout = 15000
+    conn.readTimeout = 30000
+    conn.useCaches = false
+    try {
+        return when (val code = conn.responseCode) {
+            in 200..299 -> conn.inputStream.use { it.readBytes() }
+            301, 302, 303, 307, 308 -> {
+                if (redirectsLeft <= 0) {
+                    throw java.io.IOException("重定向次数过多: $url")
+                }
+                val location = conn.getHeaderField("Location")
+                    ?: throw java.io.IOException("HTTP $code 缺少 Location 头")
+                // Location 可能是相对路径，按当前 URL 解析
+                downloadWithRedirects(URI(url).resolve(location).toString(), redirectsLeft - 1)
+            }
+            else -> throw java.io.IOException("HTTP $code")
+        }
+    } finally {
+        conn.disconnect()
     }
 }
 
@@ -776,6 +870,14 @@ private fun resolveFileUrl(url: String): File {
     // Windows 下 /C:/... 形式需去掉前导斜杠
     return if (path.matches(Regex("^/[A-Za-z]:/.*"))) File(path.substring(1)) else File(path)
 }
+
+/**
+ * 当前系统是否为 macOS。
+ * macOS 上 JCEF 不支持 windowed 渲染（createBrowser 必失败），
+ * 全景查看器在 macOS 上直接走系统浏览器降级路径。
+ */
+private fun isMacOs(): Boolean =
+    System.getProperty("os.name").lowercase().contains("mac")
 
 /**
  * 在系统默认浏览器中打开文件（降级方案使用）。
