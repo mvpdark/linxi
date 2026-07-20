@@ -9,30 +9,35 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      actions: read
     steps:
-      - name: Prepare dummy assets
-        run: |
-          mkdir -p debug-assets
-          echo "small test" > debug-assets/small.txt
-          dd if=/dev/zero of=debug-assets/large.bin bs=1M count=100
+      - uses: actions/checkout@v4
+
+      - name: gh version
+        run: gh --version
+
+      - name: Download real artifacts from run 29709447658
+        uses: actions/download-artifact@v4
+        with:
+          name: lingxi-desktop-msi
+          path: artifacts
+          run-id: 29709447658
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Create debug release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          out=$(gh release create "v0.0.0-debug" --title "debug" --notes "debug" 2>&1) && echo "create OK" || echo "::error::create failed: $out"
+          out=$(gh release create "v0.0.0-debug" --title "debug" --notes "debug" 2>&1) && echo "create OK: $out" || echo "::error::create failed: $out"
 
-      - name: Upload small asset
+      - name: Upload real MSI asset
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          out=$(gh release upload "v0.0.0-debug" debug-assets/small.txt --clobber 2>&1) && echo "small OK: $out" || echo "::error::small upload failed: $out"
-
-      - name: Upload large asset (100MB)
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          out=$(gh release upload "v0.0.0-debug" debug-assets/large.bin --clobber 2>&1) && echo "large OK: $out" || echo "::error::large upload failed: $out"
+          ls -la artifacts/
+          f=$(find artifacts -name '*.msi' | head -1)
+          echo "found: $f size=$(du -m "$f" | cut -f1)MB"
+          out=$(gh release upload "v0.0.0-debug" "$f" --clobber 2>&1) && echo "upload OK: $out" || echo "::error::upload failed: $out"
 
       - name: Cleanup debug release
         if: always()
