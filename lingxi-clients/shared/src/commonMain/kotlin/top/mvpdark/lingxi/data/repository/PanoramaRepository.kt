@@ -37,8 +37,8 @@ class PanoramaRepository(
      * POST /api/panorama/ai-generate，multipart 字段：floor_plan + style_desc。
      * 后端返回 {image: dataUrl, id: pano_id}。
      *
-     * 超时：AI 生成通常需要 30-60 秒，per-request 设置 120 秒
-     * （覆盖全局 30 秒 socket/request 超时，与后端 600 秒超时留足余量）。
+     * 超时：AI 生成通常需要 30-180 秒，后端 image_service 超时设为 600 秒，
+     * 客户端 per-request 设置 600 秒以匹配后端，避免后端仍在生成时客户端已超时报错。
      */
     suspend fun aiGenerate(
         floorPlanBytes: ByteArray,
@@ -57,8 +57,8 @@ class PanoramaRepository(
                 },
             ) {
                 timeout {
-                    requestTimeoutMillis = 120_000
-                    socketTimeoutMillis = 120_000
+                    requestTimeoutMillis = 600_000
+                    socketTimeoutMillis = 600_000
                 }
             }.body<PanoramaResponse>()
         }.getOrElse { e ->
