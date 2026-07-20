@@ -128,6 +128,16 @@ class ChatRepository(
                         close()
                         return@webSocket
                     }
+                } else {
+                    // W3 修复（认证包丢失静默失败）：连接在 auth ack 前被关闭时，
+                    // 原逻辑会继续 send(chatJson)，随后遍历已关闭的 incoming 立即结束，
+                    // flow 正常完成，用户看到“发送中”结束后无回复也无错误。
+                    // 这里显式发出错误事件并终止流程，让 UI 能提示用户重试。
+                    if (trySend(AgentEvent(type = "error", error = "连接已断开，请重试")).isFailure) {
+                        PlatformLogger.w("ChatRepository", "Failed to send event: channel may be closed")
+                    }
+                    close()
+                    return@webSocket
                 }
 
                 // 2. 发送聊天消息

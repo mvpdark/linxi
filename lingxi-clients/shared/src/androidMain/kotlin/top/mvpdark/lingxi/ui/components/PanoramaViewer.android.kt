@@ -237,13 +237,18 @@ actual fun PanoramaViewer(
             settings.domStorageEnabled = true
             settings.allowFileAccess = true
             settings.allowContentAccess = true
-            settings.allowFileAccessFromFileURLs = true
-            settings.allowUniversalAccessFromFileURLs = true
+            // 收窄 file:// XHR 权限：所有内容已经 WebViewAssetLoader 走
+            // https://appassets.androidplatform.net 同源加载，不需要 file:// XHR 权限
+            // （allowFileAccess / allowContentAccess 保持 true 不动）
+            settings.allowFileAccessFromFileURLs = false
+            settings.allowUniversalAccessFromFileURLs = false
             settings.mediaPlaybackRequiresUserGesture = false
             setLayerType(android.view.View.LAYER_TYPE_HARDWARE, null)
 
-            // 启用 WebView 调试（chrome://inspect）
-            WebView.setWebContentsDebuggingEnabled(true)
+            // 启用 WebView 调试（chrome://inspect）：按应用可调试标志动态开启，
+            // 仅 debuggable 构建生效，release 包关闭
+            val debuggable = (context.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
+            WebView.setWebContentsDebuggingEnabled(debuggable)
 
             // JS 桥：HTML 中的 panorama_viewer.html 通过 window.AndroidBridge 回传加载结果
             // 注意：@JavascriptInterface 回调运行在 WebView 私有 JavaBridge 线程，
@@ -252,7 +257,12 @@ actual fun PanoramaViewer(
             addJavascriptInterface(
                 PanoramaJsBridge(
                     onRendered = {
-                        mainHandler.post { renderState = 2 }
+                        mainHandler.post {
+                            renderState = 2
+                            // W6：看门狗超时后迟到的加载成功也要清除错误遮罩，
+                            // 否则错误层会永久盖在正常渲染的全景上
+                            loadError = null
+                        }
                     },
                     onError = { msg ->
                         mainHandler.post {
@@ -279,8 +289,10 @@ actual fun PanoramaViewer(
                     view: WebView?,
                     request: WebResourceRequest?
                 ): WebResourceResponse? {
-                    val url = request?.url?.toString() ?: return null
-                    return assetLoader.shouldInterceptRequest(url)
+                    // WebViewAssetLoader.shouldInterceptRequest 仅接受 Uri 重载，
+                    // 传 String 会编译失败（1.x 起 String 重载已移除）
+                    val uri = request?.url ?: return null
+                    return assetLoader.shouldInterceptRequest(uri)
                         ?: super.shouldInterceptRequest(view, request)
                 }
 
@@ -301,6 +313,7 @@ actual fun PanoramaViewer(
         }
     }
 
+    // WebView 销毁：只执行一次（webView 由 remember 持有，只允许 destroy 一次）
     DisposableEffect(Unit) {
         onDispose {
             // 销毁 WebView 前先调用 JS 清理，避免 Pannellum 的 WebGL 上下文泄漏
@@ -308,7 +321,16 @@ actual fun PanoramaViewer(
                 webView.evaluateJavascript("if(typeof __destroyPanorama==='function') __destroyPanorama();", null)
             } catch (_: Exception) { }
             webView.destroy()
-            htmlPath?.let { path ->
+        }
+    }
+
+    // 临时目录清理：按 key 清理。htmlPath 每次变化时，旧 key 的 onDispose 先执行删除旧目录，
+    // 新 key 的 Effect 再启动；离开组合时清理当前目录。
+    // 避免同一会话多次切换全景图时旧 panorama_* 目录永不删除导致的泄漏。
+    DisposableEffect(htmlPath) {
+        val currentPath = htmlPath
+        onDispose {
+            currentPath?.let { path ->
                 try {
                     File(path).deleteRecursively()
                 } catch (e: Exception) {

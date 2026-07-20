@@ -14,7 +14,7 @@ object EncodeUtils {
     /**
      * 将字节流编码为 Base64 字符串。
      *
-     * 纯 Kotlin 实现，与 PanoramaViewModel 中的算法保持一致，确保跨平台行为统一。
+     * 纯 Kotlin 实现，不依赖平台 API，确保 commonMain 跨平台行为统一。
      */
     fun encodeBase64(bytes: ByteArray): String {
         val sb = StringBuilder()

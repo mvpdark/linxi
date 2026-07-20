@@ -7,6 +7,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import top.mvpdark.lingxi.core.util.EncodeUtils
 import top.mvpdark.lingxi.core.util.PlatformLogger
 import top.mvpdark.lingxi.core.util.toUserMessage
 import top.mvpdark.lingxi.data.repository.PanoramaRepository
@@ -43,7 +44,7 @@ class PanoramaViewModel(
         if (!isProcessing.compareAndSet(false, true)) return
         viewModelScope.launch {
             try {
-                val dataUrl = "data:image/jpeg;base64," + encodeBase64(bytes)
+                val dataUrl = EncodeUtils.bytesToDataUrl(bytes)
                 _uiState.update {
                     it.copy(
                         step = Step.Edit,
@@ -143,24 +144,4 @@ class PanoramaViewModel(
     override fun onCleared() {
         super.onCleared()
     }
-}
-
-/** 简单的 Base64 编码（纯 Kotlin 实现）。 */
-private fun encodeBase64(bytes: ByteArray): String {
-    val table = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
-    val sb = StringBuilder()
-    var i = 0
-    while (i < bytes.size) {
-        val b0 = bytes[i].toInt() and 0xFF
-        val b1 = if (i + 1 < bytes.size) bytes[i + 1].toInt() and 0xFF else -1
-        val b2 = if (i + 2 < bytes.size) bytes[i + 2].toInt() and 0xFF else -1
-
-        sb.append(table[b0 ushr 2])
-        sb.append(table[((b0 and 0x03) shl 4) or (if (b1 >= 0) b1 ushr 4 else 0)])
-        sb.append(if (b1 >= 0) table[((b1 and 0x0F) shl 2) or (if (b2 >= 0) b2 ushr 6 else 0)] else '=')
-        sb.append(if (b2 >= 0) table[b2 and 0x3F] else '=')
-
-        i += 3
-    }
-    return sb.toString()
 }

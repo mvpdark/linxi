@@ -17,3 +17,10 @@ expect fun getAppVersion(): String
 
 /** 当前平台是否支持应用内自动更新（Android=true, Desktop=false）。 */
 expect fun isAutoUpdateSupported(): Boolean
+
+/**
+ * 返回本地时区相对 UTC 的偏移分钟数（含当前生效的夏令时）。
+ *
+ * 用于将服务端存储的 UTC 时间戳换算为本地时间显示（如东八区返回 +480）。
+ */
+internal expect fun localUtcOffsetMinutes(): Int

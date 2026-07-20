@@ -14,3 +14,6 @@ actual fun getAppVersion(): String {
 }
 
 actual fun isAutoUpdateSupported(): Boolean = false
+
+internal actual fun localUtcOffsetMinutes(): Int =
+    java.util.TimeZone.getDefault().getOffset(System.currentTimeMillis()) / 60000

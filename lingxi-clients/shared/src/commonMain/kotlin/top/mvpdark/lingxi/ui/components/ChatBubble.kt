@@ -121,29 +121,29 @@ fun ChatBubble(
                 Modifier
             }
 
-            Box(
-                modifier = Modifier
-                    .then(if (bubbleShadowElevation > 0.dp) {
-                        if (isNoirAurum && !isUser) {
-                            // Noir Aurum AI 气泡：金色阴影（漆器莳绘浮起的光泽）
-                            Modifier.shadow(
-                                elevation = 2.dp,
-                                shape = bubbleShape,
-                                ambientColor = Champagne.copy(alpha = 0.1f),
-                                spotColor = Champagne.copy(alpha = 0.15f),
-                            )
+            if (text.isNotBlank()) {
+                Box(
+                    modifier = Modifier
+                        .then(if (bubbleShadowElevation > 0.dp) {
+                            if (isNoirAurum && !isUser) {
+                                // Noir Aurum AI 气泡：金色阴影（漆器莳绘浮起的光泽）
+                                Modifier.shadow(
+                                    elevation = 2.dp,
+                                    shape = bubbleShape,
+                                    ambientColor = Champagne.copy(alpha = 0.1f),
+                                    spotColor = Champagne.copy(alpha = 0.15f),
+                                )
+                            } else {
+                                Modifier.shadow(elevation = bubbleShadowElevation, shape = bubbleShape)
+                            }
                         } else {
-                            Modifier.shadow(elevation = bubbleShadowElevation, shape = bubbleShape)
-                        }
-                    } else {
-                        Modifier
-                    })
-                    .then(goldBorderModifier)
-                    .clip(bubbleShape)
-                    .background(brush = bubbleBrush)
-                    .padding(horizontal = 14.dp, vertical = 10.dp),
-            ) {
-                if (text.isNotBlank()) {
+                            Modifier
+                        })
+                        .then(goldBorderModifier)
+                        .clip(bubbleShape)
+                        .background(brush = bubbleBrush)
+                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                ) {
                     Text(
                         text = text,
                         style = MaterialTheme.typography.bodyLarge,

@@ -10,6 +10,7 @@ import android.os.Environment
 import android.provider.MediaStore
 import androidx.core.content.ContextCompat
 import java.io.File
+import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
 import kotlin.io.encoding.Base64
@@ -34,13 +35,15 @@ actual class ImageSaver actual constructor(private val context: PlatformContext)
                 val bytes = readBytes(imageUrl)
                 require(bytes.isNotEmpty()) { "图片内容为空" }
 
-                val fileName = "${sanitizeFileName(suggestedName)}_${System.currentTimeMillis()}.jpg"
+                // 根据字节魔数推断真实格式，避免 PNG/WebP 被强制存为 .jpg + image/jpeg
+                val (ext, mimeType) = detectImageFormat(bytes)
+                val fileName = "${sanitizeFileName(suggestedName)}_${System.currentTimeMillis()}.$ext"
                 val appContext = context.androidContext
 
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    saveWithMediaStore(appContext, bytes, fileName)
+                    saveWithMediaStore(appContext, bytes, fileName, mimeType)
                 } else {
-                    saveLegacy(appContext, bytes, fileName)
+                    saveLegacy(appContext, bytes, fileName, mimeType)
                 }
             }
         }
@@ -67,6 +70,10 @@ actual class ImageSaver actual constructor(private val context: PlatformContext)
         connection.readTimeout = 30_000
         connection.instanceFollowRedirects = true
         return try {
+            val responseCode = connection.responseCode
+            if (responseCode != HttpURLConnection.HTTP_OK) {
+                throw IOException("HTTP $responseCode")
+            }
             connection.inputStream.use { it.readBytes() }
         } finally {
             connection.disconnect()
@@ -86,10 +93,15 @@ actual class ImageSaver actual constructor(private val context: PlatformContext)
     /**
      * API 29+：通过 MediaStore 插入相册（Pictures/Lingxi），无需权限。
      */
-    private fun saveWithMediaStore(context: Context, bytes: ByteArray, fileName: String): String {
+    private fun saveWithMediaStore(
+        context: Context,
+        bytes: ByteArray,
+        fileName: String,
+        mimeType: String,
+    ): String {
         val contentValues = ContentValues().apply {
             put(MediaStore.Images.Media.DISPLAY_NAME, fileName)
-            put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
+            put(MediaStore.Images.Media.MIME_TYPE, mimeType)
             put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/Lingxi")
         }
         val resolver = context.contentResolver
@@ -111,7 +123,12 @@ actual class ImageSaver actual constructor(private val context: PlatformContext)
      * 需要 WRITE_EXTERNAL_STORAGE 权限（运行时检查，未授权返回失败信息）。
      */
     @Suppress("DEPRECATION")
-    private fun saveLegacy(context: Context, bytes: ByteArray, fileName: String): String {
+    private fun saveLegacy(
+        context: Context,
+        bytes: ByteArray,
+        fileName: String,
+        mimeType: String,
+    ): String {
         val granted = ContextCompat.checkSelfPermission(
             context,
             Manifest.permission.WRITE_EXTERNAL_STORAGE,
@@ -132,10 +149,37 @@ actual class ImageSaver actual constructor(private val context: PlatformContext)
         MediaScannerConnection.scanFile(
             context,
             arrayOf(file.absolutePath),
-            arrayOf("image/jpeg"),
+            arrayOf(mimeType),
             null,
         )
         return "已保存到相册：${file.absolutePath}"
+    }
+
+    /**
+     * 根据字节魔数推断图片真实格式，返回（扩展名, MIME 类型）。
+     *
+     * - PNG：89 50 4E 47（'\x89' 'PNG'）
+     * - JPEG：FF D8 FF
+     * - WebP：字节 0-3 为 'RIFF' 且 8-11 为 'WEBP'
+     * - GIF：'GIF8'
+     * - 无法识别时回退为 jpg / image/jpeg
+     */
+    private fun detectImageFormat(bytes: ByteArray): Pair<String, String> {
+        fun matches(offset: Int, vararg magic: Int): Boolean {
+            if (bytes.size < offset + magic.size) return false
+            for (i in magic.indices) {
+                if ((bytes[offset + i].toInt() and 0xFF) != magic[i]) return false
+            }
+            return true
+        }
+        return when {
+            matches(0, 0x89, 0x50, 0x4E, 0x47) -> "png" to "image/png"
+            matches(0, 0xFF, 0xD8, 0xFF) -> "jpg" to "image/jpeg"
+            matches(0, 0x52, 0x49, 0x46, 0x46) &&
+                matches(8, 0x57, 0x45, 0x42, 0x50) -> "webp" to "image/webp"
+            matches(0, 0x47, 0x49, 0x46, 0x38) -> "gif" to "image/gif"
+            else -> "jpg" to "image/jpeg"
+        }
     }
 
     /**

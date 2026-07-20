@@ -4,6 +4,8 @@ import ai.onnxruntime.OnnxTensor
 import ai.onnxruntime.OrtEnvironment
 import ai.onnxruntime.OrtSession
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import top.mvpdark.lingxi.core.network.PlatformContext
 import top.mvpdark.lingxi.core.util.PlatformLogger
@@ -45,6 +47,10 @@ import java.nio.LongBuffer
 actual class SamService actual constructor(@Suppress("UNUSED_PARAMETER") context: PlatformContext) {
 
     private val env: OrtEnvironment = OrtEnvironment.getEnvironment()
+
+    // loadModel 并发互斥锁（W17）：防止并发加载导致 OrtSession 被覆盖、native 内存泄漏
+    private val loadMutex = Mutex()
+
     @Volatile private var visionSession: OrtSession? = null
     @Volatile private var decoderSession: OrtSession? = null
 
@@ -68,54 +74,57 @@ actual class SamService actual constructor(@Suppress("UNUSED_PARAMETER") context
      */
     actual suspend fun loadModel(onProgress: (Int, String) -> Unit) {
         if (isReady) return
-        withContext(Dispatchers.Default) {
-            onProgress(5, "准备模型目录")
-            val modelsDir = resolveModelsDir()
-            require(modelsDir.exists()) {
-                "Models directory not found: ${modelsDir.absolutePath}"
-            }
+        loadMutex.withLock {
+            if (isReady) return
+            withContext(Dispatchers.Default) {
+                onProgress(5, "准备模型目录")
+                val modelsDir = resolveModelsDir()
+                require(modelsDir.exists()) {
+                    "Models directory not found: ${modelsDir.absolutePath}"
+                }
 
-            // 1. 检查模型文件是否存在
-            val visionOnnx = File(modelsDir, "vision_encoder_fp16.onnx")
-            require(visionOnnx.exists()) {
-                "Vision encoder model not found: ${visionOnnx.absolutePath}"
-            }
-            val decoderOnnx = File(modelsDir, "prompt_mask_decoder_fp16.onnx")
-            require(decoderOnnx.exists()) {
-                "Decoder model not found: ${decoderOnnx.absolutePath}"
-            }
+                // 1. 检查模型文件是否存在
+                val visionOnnx = File(modelsDir, "vision_encoder_fp16.onnx")
+                require(visionOnnx.exists()) {
+                    "Vision encoder model not found: ${visionOnnx.absolutePath}"
+                }
+                val decoderOnnx = File(modelsDir, "prompt_mask_decoder_fp16.onnx")
+                require(decoderOnnx.exists()) {
+                    "Decoder model not found: ${decoderOnnx.absolutePath}"
+                }
 
-            // 2. 创建 SessionOptions（ALL_OPT + XNNPACK CPU 加速）
-            val opts = OrtSession.SessionOptions().apply {
-                setOptimizationLevel(OrtSession.SessionOptions.OptLevel.ALL_OPT)
-                setIntraOpNumThreads(Runtime.getRuntime().availableProcessors().coerceAtMost(4))
-            }
-            // XNNPACK EP 加速 CPU 推理；部分平台/构建可能不包含 XNNPACK，静默忽略
-            runCatching { opts.addXnnpack(emptyMap()) }
-                .onFailure { PlatformLogger.w("SamService", "XNNPACK unavailable: ${it.message}") }
+                // 2. 创建 SessionOptions（ALL_OPT + XNNPACK CPU 加速）
+                val opts = OrtSession.SessionOptions().apply {
+                    setOptimizationLevel(OrtSession.SessionOptions.OptLevel.ALL_OPT)
+                    setIntraOpNumThreads(Runtime.getRuntime().availableProcessors().coerceAtMost(4))
+                }
+                // XNNPACK EP 加速 CPU 推理；部分平台/构建可能不包含 XNNPACK，静默忽略
+                runCatching { opts.addXnnpack(emptyMap()) }
+                    .onFailure { PlatformLogger.w("SamService", "XNNPACK unavailable: ${it.message}") }
 
-            try {
-                // 3. 加载 vision encoder（用文件路径，不用字节，因 .onnx_data 需同目录）
-                onProgress(30, "vision_encoder_fp16.onnx")
-                visionSession = env.createSession(visionOnnx.absolutePath, opts)
-                discoverVisionIO(visionSession!!)
+                try {
+                    // 3. 加载 vision encoder（用文件路径，不用字节，因 .onnx_data 需同目录）
+                    onProgress(30, "vision_encoder_fp16.onnx")
+                    visionSession = env.createSession(visionOnnx.absolutePath, opts)
+                    discoverVisionIO(visionSession!!)
 
-                // 4. 加载 prompt_mask_decoder
-                onProgress(70, "prompt_mask_decoder_fp16.onnx")
-                decoderSession = env.createSession(decoderOnnx.absolutePath, opts)
-                discoverDecoderIO(decoderSession!!)
+                    // 4. 加载 prompt_mask_decoder
+                    onProgress(70, "prompt_mask_decoder_fp16.onnx")
+                    decoderSession = env.createSession(decoderOnnx.absolutePath, opts)
+                    discoverDecoderIO(decoderSession!!)
 
-                isReady = true
-                onProgress(100, "模型加载完成")
-            } catch (e: Exception) {
-                PlatformLogger.e("SamService", "loadModel failed", e)
-                runCatching { visionSession?.close() }
-                runCatching { decoderSession?.close() }
-                visionSession = null
-                decoderSession = null
-                throw e
-            } finally {
-                runCatching { opts.close() }
+                    isReady = true
+                    onProgress(100, "模型加载完成")
+                } catch (e: Exception) {
+                    PlatformLogger.e("SamService", "loadModel failed", e)
+                    runCatching { visionSession?.close() }
+                    runCatching { decoderSession?.close() }
+                    visionSession = null
+                    decoderSession = null
+                    throw e
+                } finally {
+                    runCatching { opts.close() }
+                }
             }
         }
     }
@@ -470,13 +479,17 @@ actual class SamService actual constructor(@Suppress("UNUSED_PARAMETER") context
     }
 
     /**
-     * 解析 mask 的通道数。
+     * 解析 mask 的通道数（与 resolveMaskDims 的维度语义保持一致）。
+     *
+     * - [1, N, C, H, W] → 5D：返回 C（shape[2]）
+     * - [1, N, H, W] → 4D：无独立通道维，N 个物体各占一张 HxW mask，返回 1
+     * - [N, H, W] → 3D：无 batch 和通道维，返回 1
      */
     private fun resolveMaskChannelCount(shape: LongArray): Int {
         return when (shape.size) {
             5 -> shape[2].toInt()  // [1, N, C, H, W]
-            4 -> shape[1].toInt()  // [N, C, H, W]
-            else -> 1              // [N, H, W] 或 [1, N, H, W]
+            4 -> 1                 // [1, N, H, W]（无通道维，与 resolveMaskDims 语义一致）
+            else -> 1              // [N, H, W]
         }
     }
 

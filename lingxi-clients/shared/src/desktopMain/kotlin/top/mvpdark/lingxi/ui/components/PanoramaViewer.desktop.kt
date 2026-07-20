@@ -143,7 +143,7 @@ actual fun PanoramaViewer(
         }
     }
 
-    // 3. 离开组合时停止 WebView 渲染，释放 WebKit 原生资源，并清理临时文件
+    // 3. 离开组合时停止 WebView 渲染，释放 WebKit 原生资源
     DisposableEffect(Unit) {
         onDispose {
             val engine = webEngine
@@ -155,15 +155,22 @@ actual fun PanoramaViewer(
                     }
                 }
             }
-            // 清理临时全景图目录。WebKit 释放文件句柄是异步的，稍作延迟再删除
-            // 以提高 Windows 上的成功率；即使删除失败，仍由 preparePanoramaFiles
-            // 注册的 JVM shutdown hook 在退出时兜底清理，不会泄漏。
-            val dir = htmlFile?.parentFile
-            if (dir != null) {
+        }
+    }
+
+    // 4. 临时目录清理绑定到当前目录对象：htmlFile 切换（同会话换全景图）时，
+    //    旧 key 的 onDispose 先执行删除旧目录，新 key 的 Effect 再启动；
+    //    离开组合时清理当前目录，避免旧 panorama_* 目录泄漏。
+    //    WebKit 释放文件句柄是异步的，稍作延迟再删除以提高 Windows 上的成功率；
+    //    即使删除失败，仍由全局唯一的 JVM shutdown hook 在退出时兜底清理，不会泄漏。
+    val panoramaDir = htmlFile?.parentFile
+    DisposableEffect(panoramaDir) {
+        onDispose {
+            if (panoramaDir != null) {
                 thread(isDaemon = true, name = "panorama-cleanup") {
                     runCatching {
                         Thread.sleep(800)
-                        dir.deleteRecursively()
+                        panoramaDir.deleteRecursively()
                     }
                 }
             }
@@ -307,6 +314,27 @@ actual fun PanoramaViewer(
                 }
             }
         }
+    }
+}
+
+/** 全景图临时目录管理：统一放在 {java.io.tmpdir}/lingxi-panorama/ 下，全局只注册一次 JVM shutdown hook。 */
+private object PanoramaTempDir {
+    private val registered = AtomicBoolean(false)
+    private val parentDir: File = File(
+        System.getProperty("java.io.tmpdir"),
+        "lingxi-panorama"
+    )
+
+    fun allocateDir(): File {
+        // 首次调用时注册全局唯一的 shutdown hook，删除整个父目录
+        if (registered.compareAndSet(false, true)) {
+            Runtime.getRuntime().addShutdownHook(Thread {
+                parentDir.deleteRecursively()
+            })
+        }
+        val dir = File(parentDir, "panorama_${System.currentTimeMillis()}")
+        dir.mkdirs()
+        return dir
     }
 }
 
@@ -461,18 +489,9 @@ private fun ensureJavaFXInitialized() {
  * 避免 $a 等 JS 变量名被 Kotlin 解析为模板表达式。
  */
 private suspend fun preparePanoramaFiles(imageUrl: String): File {
-    // 1. 创建临时目录
-    val dir = File(System.getProperty("java.io.tmpdir"), "panorama_${System.currentTimeMillis()}")
-    dir.mkdirs()
-
-    // 注册 JVM 关闭钩子：在 JVM 退出时递归删除整个临时目录，避免临时文件泄漏。
-    // 说明：File.deleteOnExit() 只能删除单个文件，无法删除非空目录（JVM 退出时
-    // 目录若仍非空则删除失败），因此采用 shutdown hook + deleteRecursively() 方案，
-    // 确保 pannellum.js / pannellum.css / panorama_data.js / index.html 及目录本身
-    // 都能被彻底清理。
-    Runtime.getRuntime().addShutdownHook(Thread {
-        dir.deleteRecursively()
-    })
+    // 1. 创建临时目录（统一父目录 {tmpdir}/lingxi-panorama/panorama_<ts>，
+    //    JVM shutdown hook 在 PanoramaTempDir 内全局仅注册一次，退出时删除整个父目录）
+    val dir = PanoramaTempDir.allocateDir()
 
     // 2. 写入 pannellum.js（独立文件，不内联）
     val jsBytes = Res.readBytes("files/panorama/pannellum.js")
@@ -555,8 +574,8 @@ private suspend fun preparePanoramaFiles(imageUrl: String): File {
 
     val htmlFile = File(dir, "index.html")
     htmlFile.writeText(html)
-    // 临时文件清理由上方注册的 JVM 关闭钩子统一处理（递归删除整个临时目录），
-    // 无需再对单个文件调用 deleteOnExit()。
+    // 临时文件清理由 PanoramaTempDir 内全局唯一的 shutdown hook 兜底（退出时
+    // 递归删除整个 lingxi-panorama 父目录），无需再对单个文件调用 deleteOnExit()。
     return htmlFile
 }
 

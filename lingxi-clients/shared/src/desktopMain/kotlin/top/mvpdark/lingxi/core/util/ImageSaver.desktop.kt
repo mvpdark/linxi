@@ -3,6 +3,7 @@ package top.mvpdark.lingxi.core.util
 import java.awt.FileDialog
 import java.awt.Frame
 import java.io.File
+import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
 import kotlin.io.encoding.Base64
@@ -27,7 +28,9 @@ actual class ImageSaver actual constructor(@Suppress("UNUSED_PARAMETER") context
                 val bytes = readBytes(imageUrl)
                 require(bytes.isNotEmpty()) { "图片内容为空" }
 
-                val target = chooseSaveFile(suggestedName) ?: error("已取消保存")
+                // 根据字节魔数推断真实格式，用推断出的扩展名构造默认文件名
+                val (ext, _) = detectImageFormat(bytes)
+                val target = chooseSaveFile(suggestedName, ext) ?: error("已取消保存")
                 target.writeBytes(bytes)
                 "已保存：${target.absolutePath}"
             }
@@ -36,16 +39,16 @@ actual class ImageSaver actual constructor(@Suppress("UNUSED_PARAMETER") context
     /**
      * 弹出保存对话框，返回用户选择的目标文件；取消时返回 null。
      *
-     * 若用户输入的文件名缺少 .jpg 扩展名则自动补齐。
+     * 若用户输入的文件名缺少对应扩展名，则按推断出的真实格式 [ext] 自动补齐。
      */
-    private fun chooseSaveFile(suggestedName: String): File? {
+    private fun chooseSaveFile(suggestedName: String, ext: String): File? {
         val dialog = FileDialog(null as Frame?, "保存图片", FileDialog.SAVE)
-        dialog.file = "${sanitizeFileName(suggestedName)}.jpg"
+        dialog.file = "${sanitizeFileName(suggestedName)}.$ext"
         dialog.isVisible = true
         val dir = dialog.directory
         val file = dialog.file
         return if (dir != null && file != null) {
-            File(dir, if (file.endsWith(".jpg", ignoreCase = true)) file else "$file.jpg")
+            File(dir, if (file.endsWith(".$ext", ignoreCase = true)) file else "$file.$ext")
         } else {
             null
         }
@@ -73,6 +76,10 @@ actual class ImageSaver actual constructor(@Suppress("UNUSED_PARAMETER") context
         connection.readTimeout = 30_000
         connection.instanceFollowRedirects = true
         return try {
+            val responseCode = connection.responseCode
+            if (responseCode != HttpURLConnection.HTTP_OK) {
+                throw IOException("HTTP $responseCode")
+            }
             connection.inputStream.use { it.readBytes() }
         } finally {
             connection.disconnect()
@@ -87,6 +94,33 @@ actual class ImageSaver actual constructor(@Suppress("UNUSED_PARAMETER") context
         val commaIdx = dataUrl.indexOf(',')
         val base64 = if (commaIdx >= 0) dataUrl.substring(commaIdx + 1) else dataUrl
         return Base64.decode(base64)
+    }
+
+    /**
+     * 根据字节魔数推断图片真实格式，返回（扩展名, MIME 类型）。
+     *
+     * - PNG：89 50 4E 47（'\x89' 'PNG'）
+     * - JPEG：FF D8 FF
+     * - WebP：字节 0-3 为 'RIFF' 且 8-11 为 'WEBP'
+     * - GIF：'GIF8'
+     * - 无法识别时回退为 jpg / image/jpeg
+     */
+    private fun detectImageFormat(bytes: ByteArray): Pair<String, String> {
+        fun matches(offset: Int, vararg magic: Int): Boolean {
+            if (bytes.size < offset + magic.size) return false
+            for (i in magic.indices) {
+                if ((bytes[offset + i].toInt() and 0xFF) != magic[i]) return false
+            }
+            return true
+        }
+        return when {
+            matches(0, 0x89, 0x50, 0x4E, 0x47) -> "png" to "image/png"
+            matches(0, 0xFF, 0xD8, 0xFF) -> "jpg" to "image/jpeg"
+            matches(0, 0x52, 0x49, 0x46, 0x46) &&
+                matches(8, 0x57, 0x45, 0x42, 0x50) -> "webp" to "image/webp"
+            matches(0, 0x47, 0x49, 0x46, 0x38) -> "gif" to "image/gif"
+            else -> "jpg" to "image/jpeg"
+        }
     }
 
     /**

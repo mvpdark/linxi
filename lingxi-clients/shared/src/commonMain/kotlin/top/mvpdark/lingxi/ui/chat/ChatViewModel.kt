@@ -186,10 +186,20 @@ class ChatViewModel(
             }
             result
                 .onSuccess { history ->
-                    _uiState.update { it.copy(messages = history) }
+                    // W1 修复（会话切换竞态）：异步加载期间用户可能已切到其他会话，
+                    // 若 A 的加载晚于 B 完成，A 的历史会写入 B 的界面。
+                    // 在 update lambda 内原子校验 currentSessionId，不一致则丢弃过期结果。
+                    _uiState.update {
+                        if (it.currentSessionId != sessionId) it
+                        else it.copy(messages = history)
+                    }
                 }
                 .onFailure { e ->
-                    _uiState.update { it.copy(error = "加载本地历史失败: ${e.message}") }
+                    // 同样仅在仍是当前会话时展示错误，避免过期错误覆盖新会话状态
+                    _uiState.update {
+                        if (it.currentSessionId != sessionId) it
+                        else it.copy(error = "加载本地历史失败: ${e.message}")
+                    }
                 }
         }
     }
@@ -401,8 +411,12 @@ class ChatViewModel(
             }
             "delta" -> {
                 // 流式增量追加
+                // W2 修复（发送中切换会话串台）：流式期间用户可能已切到其他会话，
+                // 仅当事件属于当前可见会话时才追加 streamingText；
+                // 否则跳过 UI 更新（本地存储不受影响，仍按原 sessionId 归档）。
                 _uiState.update {
-                    it.copy(streamingText = it.streamingText + event.content)
+                    if (it.currentSessionId != sessionId) it
+                    else it.copy(streamingText = it.streamingText + event.content)
                 }
             }
             "search_image" -> {
@@ -435,37 +449,52 @@ class ChatViewModel(
                         images = localImages,
                         timestamp = "",
                     )
+                    // W2 修复（发送中切换会话串台）：仅当当前会话仍是该流所属的 sessionId 时，
+                    // 才把消息追加到 UI 消息列表；否则丢弃 UI 更新，但本地存储仍按正确 sessionId 归档。
                     _uiState.update {
-                        it.copy(
+                        if (it.currentSessionId != sessionId) it
+                        else it.copy(
                             messages = it.messages + aiMessage,
                         )
                     }
-                    // AI消息保存到本地存储
+                    // AI消息保存到本地存储（始终执行，不受会话切换影响）
                     runCatching { localMessageStore.saveMessage(sessionId, aiMessage) }
                 }
-                // 无条件清理流式状态，避免 [IMAGE] 标记泄露和状态残留
+                // W2 修复：仅当当前会话仍是该流所属的 sessionId 时才清理流式状态；
+                // 否则保留新会话的流式状态。
                 _uiState.update {
-                    it.copy(
+                    if (it.currentSessionId != sessionId) it
+                    else it.copy(
                         streamingText = "",
                         agentStatus = null,
                         pendingImages = emptyList(),
                         agentEmojiPath = null,
                     )
                 }
-                // 智能选择完成表情，3 秒后自动回 idle
-                val doneEmoji = chooseDoneEmoji(cleanedText)
-                setEmojiWithAutoRevert(doneEmoji)
+                // 仅当仍是当前会话时才切换表情，避免旧 done 事件覆盖新会话表情
+                if (_uiState.value.currentSessionId == sessionId) {
+                    val doneEmoji = chooseDoneEmoji(cleanedText)
+                    setEmojiWithAutoRevert(doneEmoji)
+                }
             }
             "error" -> {
+                // W2 修复：isSending 属于全局发送状态（阻塞输入框），即使切换了会话也必须复位；
+                // 但错误文案、状态和表情属于当前会话 UI，仅在仍是该会话时才更新，避免串台。
                 _uiState.update {
-                    it.copy(
-                        isSending = false,
-                        agentStatus = null,
-                        error = event.error.ifBlank { event.content.ifBlank { "团团开小差了" } },
-                    )
+                    if (it.currentSessionId != sessionId) {
+                        it.copy(isSending = false)
+                    } else {
+                        it.copy(
+                            isSending = false,
+                            agentStatus = null,
+                            error = event.error.ifBlank { event.content.ifBlank { "团团开小差了" } },
+                        )
+                    }
                 }
-                // 出错：显示道歉表情，3 秒后自动回 idle
-                setEmojiWithAutoRevert(EmojiState.APOLOGIZING)
+                // 出错：显示道歉表情，3 秒后自动回 idle（同样仅在当前会话展示）
+                if (_uiState.value.currentSessionId == sessionId) {
+                    setEmojiWithAutoRevert(EmojiState.APOLOGIZING)
+                }
             }
             else -> Unit
         }

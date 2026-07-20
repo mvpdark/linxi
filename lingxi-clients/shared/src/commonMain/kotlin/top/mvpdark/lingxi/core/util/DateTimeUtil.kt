@@ -4,7 +4,8 @@ package top.mvpdark.lingxi.core.util
  * ISO 8601 时间戳格式化工具。
  *
  * 将后端返回的 ISO 8601 时间字符串（如 "2026-07-18T13:52:14.955045+00:00"）
- * 转换为用户友好的显示格式。
+ * 按字符串自带的时区偏移还原为 UTC 时刻，再换算为本机时区，
+ * 输出用户友好的显示格式。
  */
 
 /**
@@ -12,8 +13,9 @@ package top.mvpdark.lingxi.core.util
  *
  * 支持以下输入格式：
  * - "2026-07-18T13:52:14.955045+00:00"（带微秒和时区）
- * - "2026-07-18T13:52:14+00:00"（带时区）
- * - "2026-07-18T13:52:14"（无时区）
+ * - "2026-07-18T13:52:14+00:00" / "2026-07-18T09:52:14-05:00"（带正/负时区偏移）
+ * - "2026-07-18T13:52:14Z"（UTC 标记）
+ * - "2026-07-18T13:52:14"（无时区，按 UTC 处理）
  * - "2026-07-18 13:52:14"（空格分隔）
  *
  * 输出格式：
@@ -72,26 +74,21 @@ private data class DateTimeComponents(
 )
 
 /**
- * 解析 ISO 8601 字符串为日期时间组件。
+ * 解析 ISO 8601 字符串，并按字符串自带时区偏移换算为本机时区的日期时间组件。
  *
- * 兼容多种格式变体，不依赖 java.time（保证 commonMain 可用）。
+ * - 支持 "+HH:MM" / "-HH:MM" / "+HHMM" / "+HH" / "Z" 时区形式（正确处理负偏移）；
+ * - 无显式时区时按 UTC 处理（服务端存储用 UTC）；
+ * - 最终通过 [localUtcOffsetMinutes] 把 UTC 时刻换算为本地显示时刻。
+ *
+ * 不依赖 java.time（保证 commonMain 可用，且兼容 minSdk 24 无 desugaring 的 Android）。
  */
 private fun parseIso8601(input: String): DateTimeComponents? {
     if (input.isBlank()) return null
 
     return try {
-        // 提取日期和时间部分：取 "T" 或空格前的部分
-        val normalized = input.replace(' ', 'T')
-        // 去掉时区部分（Z 或 +00:00 或 +0000）
-        val withoutZone = normalized
-            .substringBefore("+")
-            .substringBefore("Z")
-            .trimEnd()
-        // 去掉微秒部分
-        val withoutMicros = withoutZone.substringBefore(".")
-
-        // 格式应为 "2026-07-18T13:52:14" 或 "2026-07-18T13:52"
-        val parts = withoutMicros.split("T")
+        // 提取日期和时间部分：取 "T" 或空格分隔的两段
+        val normalized = input.trim().replace(' ', 'T')
+        val parts = normalized.split("T")
         if (parts.size < 2) return null
 
         val dateParts = parts[0].split("-")
@@ -101,15 +98,79 @@ private fun parseIso8601(input: String): DateTimeComponents? {
         val month = dateParts[1].toIntOrNull() ?: return null
         val day = dateParts[2].toIntOrNull() ?: return null
 
-        val timeParts = parts[1].split(":")
+        // 分离时间与时区：时间只含数字、冒号、小数点，
+        // 'Z'/'+'/'-' 均标志时区起点（'-' 只会出现在负偏移中，时间本身不含 '-'）
+        val timeAndZone = parts[1]
+        var zoneStart = -1
+        var zoneSign = 1
+        for (i in timeAndZone.indices) {
+            when (timeAndZone[i]) {
+                'Z', 'z' -> { zoneStart = i; zoneSign = 0; break }
+                '+' -> { zoneStart = i; zoneSign = 1; break }
+                '-' -> { zoneStart = i; zoneSign = -1; break }
+            }
+        }
+        val timePart = if (zoneStart >= 0) timeAndZone.substring(0, zoneStart) else timeAndZone
+
+        // 时区偏移分钟数：Z 或无显式时区 → 0；否则解析 ±HH:MM / ±HHMM / ±HH
+        var offsetMinutes = 0
+        if (zoneStart >= 0 && zoneSign != 0) {
+            val zone = timeAndZone.substring(zoneStart + 1).replace(":", "")
+            if (zone.isEmpty() || zone.length > 4) return null
+            val offsetHour = zone.substring(0, minOf(2, zone.length)).toIntOrNull() ?: return null
+            val offsetMinute = if (zone.length > 2) {
+                zone.substring(2).toIntOrNull() ?: return null
+            } else {
+                0
+            }
+            offsetMinutes = zoneSign * (offsetHour * 60 + offsetMinute)
+        }
+
+        // 去掉微秒部分
+        val timeNoMicros = timePart.substringBefore(".")
+        val timeParts = timeNoMicros.split(":")
         val hour = timeParts.getOrNull(0)?.toIntOrNull() ?: 0
         val minute = timeParts.getOrNull(1)?.toIntOrNull() ?: 0
         val second = timeParts.getOrNull(2)?.toIntOrNull() ?: 0
 
-        DateTimeComponents(year, month, day, hour, minute, second)
+        // 先按声明偏移把书写时刻还原为 UTC 毫秒，再叠加本机时区偏移得到本地显示时刻
+        val utcMillis = daysFromCivil(year, month, day) * 86_400_000L +
+            (hour * 3600L + minute * 60L + second) * 1000L -
+            offsetMinutes * 60_000L
+        epochMillisToComponents(utcMillis + localUtcOffsetMinutes() * 60_000L)
     } catch (_: Exception) {
         null
     }
+}
+
+/**
+ * 年月日转 epoch 天数（Howard Hinnant 的 days_from_civil 算法，支持 1970 年前后）。
+ */
+private fun daysFromCivil(year: Int, month: Int, day: Int): Long {
+    val y = if (month <= 2) year - 1 else year
+    val era = if (y >= 0) y / 400 else (y - 399) / 400
+    val yoe = y - era * 400 // [0, 399]
+    val mp = if (month > 2) month - 3 else month + 9 // [0, 11]
+    val doy = (153 * mp + 2) / 5 + day - 1 // [0, 365]
+    val doe = yoe * 365 + yoe / 4 - yoe / 100 + doy // [0, 146096]
+    return era * 146_097L + doe - 719_468L
+}
+
+/** 向下取整除法（Kotlin 的 "/" 向零取整，负毫秒需要 floor 语义）。 */
+private fun floorDiv(a: Long, b: Long): Long {
+    val r = a / b
+    return if ((a % b != 0L) && ((a < 0) != (b < 0))) r - 1 else r
+}
+
+/** epoch 毫秒转日期时间组件（对传入毫秒值直接展开，时区调整由调用方完成）。 */
+private fun epochMillisToComponents(millis: Long): DateTimeComponents {
+    val epochDay = floorDiv(millis, 86_400_000L)
+    val millisOfDay = millis - epochDay * 86_400_000L
+    val hour = (millisOfDay / 3_600_000L).toInt()
+    val minute = ((millisOfDay % 3_600_000L) / 60_000L).toInt()
+    val second = ((millisOfDay % 60_000L) / 1000L).toInt()
+    val (year, month, day) = epochDayToYmd(epochDay)
+    return DateTimeComponents(year, month, day, hour, minute, second)
 }
 
 /**

@@ -8,6 +8,8 @@ import android.graphics.BitmapFactory
 import android.os.Build
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import top.mvpdark.lingxi.core.network.PlatformContext
 import top.mvpdark.lingxi.data.model.Bbox
@@ -39,6 +41,10 @@ import java.nio.LongBuffer
 actual class SamService actual constructor(private val context: PlatformContext) {
 
     private val env = OrtEnvironment.getEnvironment()
+
+    // loadModel 并发互斥锁（W17）：防止并发加载导致 OrtSession 被覆盖、native 内存泄漏
+    private val loadMutex = Mutex()
+
     @Volatile private var visionSession: OrtSession? = null
     @Volatile private var decoderSession: OrtSession? = null
 
@@ -56,51 +62,54 @@ actual class SamService actual constructor(private val context: PlatformContext)
 
     actual suspend fun loadModel(onProgress: (Int, String) -> Unit) {
         if (isReady) return
-        val ctx = context.androidContext
-        val modelDir = File(ctx.filesDir, "models/edgetam")
+        loadMutex.withLock {
+            if (isReady) return
+            val ctx = context.androidContext
+            val modelDir = File(ctx.filesDir, "models/edgetam")
 
-        withContext(Dispatchers.Default) {
-            onProgress(5, "准备模型目录")
-            modelDir.mkdirs()
+            withContext(Dispatchers.Default) {
+                onProgress(5, "准备模型目录")
+                modelDir.mkdirs()
 
-            // 1. 从 assets 复制模型文件（首次）
-            val visionOnnx = copyAssetIfNeeded(
-                "vision_encoder_int8.onnx", modelDir, onProgress, 10, 25,
-            )
-            copyAssetIfNeeded(
-                "vision_encoder_int8.onnx_data", modelDir, onProgress, 25, 40,
-            )
-            val decoderOnnx = copyAssetIfNeeded(
-                "prompt_mask_decoder_int8.onnx", modelDir, onProgress, 40, 55,
-            )
-            copyAssetIfNeeded(
-                "prompt_mask_decoder_int8.onnx_data", modelDir, onProgress, 55, 70,
-            )
+                // 1. 从 assets 复制模型文件（首次）
+                val visionOnnx = copyAssetIfNeeded(
+                    "vision_encoder_int8.onnx", modelDir, onProgress, 10, 25,
+                )
+                copyAssetIfNeeded(
+                    "vision_encoder_int8.onnx_data", modelDir, onProgress, 25, 40,
+                )
+                val decoderOnnx = copyAssetIfNeeded(
+                    "prompt_mask_decoder_int8.onnx", modelDir, onProgress, 40, 55,
+                )
+                copyAssetIfNeeded(
+                    "prompt_mask_decoder_int8.onnx_data", modelDir, onProgress, 55, 70,
+                )
 
-            // 2. 创建 SessionOptions
-            val opts = createSessionOptions()
-            try {
-                // 3. 加载 vision encoder（用文件路径，不用字节）
-                onProgress(75, "加载 vision_encoder")
-                visionSession = env.createSession(visionOnnx.absolutePath, opts)
-                discoverVisionIO(visionSession!!)
+                // 2. 创建 SessionOptions
+                val opts = createSessionOptions()
+                try {
+                    // 3. 加载 vision encoder（用文件路径，不用字节）
+                    onProgress(75, "加载 vision_encoder")
+                    visionSession = env.createSession(visionOnnx.absolutePath, opts)
+                    discoverVisionIO(visionSession!!)
 
-                // 4. 加载 prompt_mask_decoder
-                onProgress(90, "加载 prompt_mask_decoder")
-                decoderSession = env.createSession(decoderOnnx.absolutePath, opts)
-                discoverDecoderIO(decoderSession!!)
+                    // 4. 加载 prompt_mask_decoder
+                    onProgress(90, "加载 prompt_mask_decoder")
+                    decoderSession = env.createSession(decoderOnnx.absolutePath, opts)
+                    discoverDecoderIO(decoderSession!!)
 
-                isReady = true
-                onProgress(100, "模型加载完成")
-            } catch (e: Exception) {
-                Log.e(TAG, "loadModel failed", e)
-                runCatching { visionSession?.close() }
-                runCatching { decoderSession?.close() }
-                visionSession = null
-                decoderSession = null
-                throw e
-            } finally {
-                runCatching { opts.close() }
+                    isReady = true
+                    onProgress(100, "模型加载完成")
+                } catch (e: Exception) {
+                    Log.e(TAG, "loadModel failed", e)
+                    runCatching { visionSession?.close() }
+                    runCatching { decoderSession?.close() }
+                    visionSession = null
+                    decoderSession = null
+                    throw e
+                } finally {
+                    runCatching { opts.close() }
+                }
             }
         }
     }
@@ -492,13 +501,17 @@ actual class SamService actual constructor(private val context: PlatformContext)
     }
 
     /**
-     * 解析 mask 的通道数。
+     * 解析 mask 的通道数（与 resolveMaskDims 的维度语义保持一致）。
+     *
+     * - [1, N, C, H, W] → 5D：返回 C（shape[2]）
+     * - [1, N, H, W] → 4D：无独立通道维，N 个物体各占一张 HxW mask，返回 1
+     * - [N, H, W] → 3D：无 batch 和通道维，返回 1
      */
     private fun resolveMaskChannelCount(shape: LongArray): Int {
         return when (shape.size) {
             5 -> shape[2].toInt()  // [1, N, C, H, W]
-            4 -> shape[1].toInt()  // [N, C, H, W]
-            else -> 1              // [N, H, W] 或 [1, N, H, W]
+            4 -> 1                 // [1, N, H, W]（无通道维，与 resolveMaskDims 语义一致）
+            else -> 1              // [N, H, W]
         }
     }
 

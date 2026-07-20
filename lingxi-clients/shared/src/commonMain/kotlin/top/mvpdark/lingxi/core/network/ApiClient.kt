@@ -16,6 +16,7 @@ import io.ktor.client.statement.request
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
+import io.ktor.http.Url
 import io.ktor.http.contentType
 import io.ktor.http.isSuccess
 import io.ktor.serialization.kotlinx.json.json
@@ -77,6 +78,14 @@ class ApiClient(
     @Volatile
     private var refreshFailed = false
 
+    /**
+     * 后端域名（从 [baseUrl] 用 Ktor [Url] 解析，commonMain 可用）。
+     * 用于限制 Bearer token 只注入到本站请求，避免泄漏给第三方域名。
+     */
+    private val baseUrlHost: String by lazy {
+        runCatching { Url(baseUrl).host }.getOrDefault("")
+    }
+
     /** 鉴权拦截器插件：注入 token + 401 自动刷新重试。 */
     private val authPlugin = createClientPlugin("AuthPlugin") {
         val store = tokenStore
@@ -85,6 +94,14 @@ class ApiClient(
         // 请求前：注入 access token
         onRequest { request, _ ->
             if (refreshFailed) return@onRequest
+            // 仅向后端域名注入 token：绝对地址指向第三方域名（如 api.github.com）时跳过；
+            // 相对地址（host 为空，稍后被 defaultRequest 合并为 baseUrl）视为本站请求。
+            val requestHost = request.url.host
+            if (baseUrlHost.isNotEmpty() && requestHost.isNotEmpty() &&
+                !requestHost.equals(baseUrlHost, ignoreCase = true)
+            ) {
+                return@onRequest
+            }
             val token = store.getAccessToken()
             if (!token.isNullOrBlank() && request.headers[HttpHeaders.Authorization] == null) {
                 request.header(HttpHeaders.Authorization, "Bearer $token")

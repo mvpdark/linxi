@@ -1,9 +1,9 @@
 package top.mvpdark.lingxi.data.local
 
 import io.ktor.client.HttpClient
-import io.ktor.client.call.body
 import io.ktor.client.request.get
 import io.ktor.client.statement.bodyAsBytes
+import io.ktor.http.isSuccess
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -70,7 +70,13 @@ class ImageCacheManager(
                 url.startsWith("file://") -> url
 
                 url.startsWith("http://") || url.startsWith("https://") -> {
-                    val bytes = httpClient.get(url).bodyAsBytes()
+                    val response = httpClient.get(url)
+                    // 校验 HTTP 状态码：错误响应（如 404 错误页）的字节一旦写入缓存，
+                    // 其本地路径会被持久化到消息中，导致坏缓存永远命中
+                    if (!response.status.isSuccess()) {
+                        error("HTTP ${response.status.value}: $url")
+                    }
+                    val bytes = response.bodyAsBytes()
                     localStore.saveImage(url, bytes)
                 }
 
