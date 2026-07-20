@@ -478,16 +478,19 @@ jobs:
           - **macOS Apple Silicon**: 下载 \`${VERSION}-lingxi-macos-arm64.dmg\`"
 
           # 第二步：逐个上传资产，单文件最多重试 3 次；--clobber 允许重跑覆盖
+          # 捕获 gh release upload 的完整 stderr+stdout，失败时打到 annotations 便于诊断
           UPLOAD_FAILED=0
           for file in release-assets/*; do
             [ -f "$file" ] || continue
             ok=0
             for attempt in 1 2 3; do
-              echo "Uploading $(basename "$file") (attempt $attempt)..."
-              if gh release upload "${VERSION}" "$file" --clobber; then
-                ok=1
+              echo "=== Uploading $(basename "$file") (attempt $attempt, $(du -m "$file" | cut -f1)MB) ==="
+              upload_output=$(gh release upload "${VERSION}" "$file" --clobber 2>&1) && ok=1
+              if [ "$ok" = "1" ]; then
+                echo "OK: $upload_output"
                 break
               fi
+              echo "::error::Upload $(basename "$file") attempt $attempt failed: $upload_output"
               sleep 10
             done
             if [ "$ok" != "1" ]; then

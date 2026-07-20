@@ -92,27 +92,33 @@ kotlin {
                 implementation(compose.desktop.currentOs)
                 implementation(libs.onnxruntime.jvm)
 
-                // JavaFX WebView：内嵌 360° 全景浏览器（替代 Desktop.browse 系统浏览器方案）。
-                // 平台分类器必须在配置期按构建机 OS/架构确定 —— 各平台 jar 内含不同的
-                // 原生库（Windows 的 jfxwebkit.dll、macOS 的 libjfxwebkit.dylib 等），
-                // 且与 compose.desktop.currentOs 一致，CI 在各平台 runner 上构建时
-                // 会自动解析到对应平台的构件。
-                val javafxVersion = "21.0.4"
+                // JCEF（Java Chromium Embedded Framework）：内嵌 Chromium 浏览器，
+                // 支持 WebGL 渲染（Pannellum 360° 全景查看器必需）。
+                // 替代旧 JavaFX WebView 方案 —— 官方 OpenJFX WebView 不支持 WebGL（JDK-8089881）。
+                //
+                // jcefgithub 是 JCEF 的 Maven 引导包装器：自动检测平台、从 classpath 提取
+                // 原生库（jcef-natives-* jar）、初始化 CefApp。配合平台对应的 jcef-natives
+                // 构件，打包后无需运行时下载。
+                //
+                // 平台分类器在配置期按构建机 OS/架构确定（与旧 JavaFX 方案同样策略），
+                // CI 在各平台 runner 上构建时会自动解析到对应平台的 natives 构件。
                 val osName = System.getProperty("os.name").lowercase()
                 val osArch = System.getProperty("os.arch").lowercase()
-                val javafxPlatform = when {
-                    osName.contains("win") -> "win"
-                    osName.contains("mac") -> if (osArch == "aarch64") "mac-aarch64" else "mac"
-                    else -> "linux"
+                val jcefWrapperVersion = "146.0.10.1"
+                val jcefNativesVersion =
+                    "jcef-65f9d7b+cef-146.0.10+g8219561+chromium-146.0.7680.179"
+                implementation("io.github.trethore:jcefgithub:$jcefWrapperVersion")
+                // jcefgithub 支持的平台：linux-amd64/arm64, windows-amd64/arm64, macosx-amd64/arm64
+                // CI: windows-latest=x64, macos-latest=Apple Silicon(aarch64)
+                val jcefNativesArtifact = when {
+                    osName.contains("win") ->
+                        if (osArch == "aarch64") "jcef-natives-windows-arm64" else "jcef-natives-windows-amd64"
+                    osName.contains("mac") ->
+                        if (osArch == "aarch64") "jcef-natives-macosx-arm64" else "jcef-natives-macosx-amd64"
+                    else ->
+                        if (osArch == "aarch64") "jcef-natives-linux-arm64" else "jcef-natives-linux-amd64"
                 }
-                implementation("org.openjfx:javafx-base:$javafxVersion:$javafxPlatform")
-                implementation("org.openjfx:javafx-graphics:$javafxVersion:$javafxPlatform")
-                // WebEngine 静态初始化强依赖 javafx.scene.control.Control，
-                // 缺少 javafx-controls 会在运行时抛 NoClassDefFoundError，必须显式声明
-                implementation("org.openjfx:javafx-controls:$javafxVersion:$javafxPlatform")
-                implementation("org.openjfx:javafx-web:$javafxVersion:$javafxPlatform")
-                implementation("org.openjfx:javafx-media:$javafxVersion:$javafxPlatform")
-                implementation("org.openjfx:javafx-swing:$javafxVersion:$javafxPlatform")
+                implementation("io.github.trethore:$jcefNativesArtifact:$jcefNativesVersion")
             }
         }
 

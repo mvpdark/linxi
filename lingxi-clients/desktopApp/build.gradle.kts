@@ -55,22 +55,23 @@ compose.desktop {
             // 特别注意：java.prefs 缺失会导致 Koin 启动时 Preferences 类加载失败 → 立即崩溃
             //          jdk.crypto.ec 缺失会导致 HTTPS TLS 握手失败（ServiceLoader 延迟加载，jdeps 检测不到）
             //
-            // 注意：JavaFX（javafx-web 等全景内嵌浏览器依赖）是 Maven 第三方模块，
+            // 注意：JCEF（jcefgithub / jcef-api / jcef-natives-*）是 Maven 第三方 jar，
             // 【不能】加入此列表 —— jlink 仅从 JDK 的 jmods 目录解析模块，
-            // 加入会报 "module not found: javafx.web" 导致打包失败。
-            // JavaFX jar 会被 jpackage 自动放入应用 classpath（app/*.jar），
-            // JFXPanel / Platform.startup 方式从 classpath 运行 JavaFX 完全可行，
-            // 原生库（jfxwebkit.dll 等）由 JavaFX 从 jar 中自动解压加载。
+            // 加入会报 "module not found" 导致打包失败。
+            // JCEF jar 会被 jpackage 自动放入应用 classpath（app/*.jar），
+            // 原生库（jcef.dll / libcef.dylib / Chromium 等）由 jcefgithub 引导器
+            // 从 classpath 的 jcef-natives-* jar 中提取到 ~/.lingxi/jcef/ 后加载。
+            // 旧 JavaFX 方案中的 jdk.jsobject 模块（netscape.javascript.JSObject，
+            // JavaFX WebEngine JS 桥专用）已移除 —— JCEF 使用自己的 JS 桥实现，不依赖该模块。
             modules(
-                "java.desktop",           // Compose Desktop (Swing/AWT)、ImageIO、BufferedImage、JFileChooser
-                "java.logging",           // ktor-client-logging、java.util.logging、JavaFX WebKit
+                "java.desktop",           // Compose Desktop (Swing/AWT)、ImageIO、BufferedImage、JFileChooser、JCEF AWT 集成
+                "java.logging",           // ktor-client-logging、java.util.logging
                 "java.management",        // onnxruntime JMX、Koin
                 "java.naming",            // JNDI（日志/SSL 间接依赖）
                 "java.net.http",          // ktor-client-java 引擎（HttpClient）
                 "java.prefs",             // TokenStore 的 java.util.prefs.Preferences（Koin 启动时即加载）
                 "jdk.crypto.cryptoki",    // HTTPS TLS — PKCS11 提供者（ServiceLoader 延迟加载）
                 "jdk.crypto.ec",          // HTTPS TLS — ECC 算法（TLS 1.3 必需，ServiceLoader 延迟加载）
-                "jdk.jsobject",           // JavaFX WebEngine JS 桥（netscape.javascript.JSObject/JSException，WebView 内部引用）
                 "jdk.unsupported",        // sun.misc.Unsafe（底层库依赖）
             )
 
@@ -92,7 +93,17 @@ compose.desktop {
                 iconFile.set(project.layout.projectDirectory.file("resources/macos/lingxi.icns"))
                 // 最低系统版本 11.0（Big Sur），同时支持 Intel 和 Apple Silicon
                 minimumSystemVersion = "11.0"
-                jvmArgs += listOf("-Xmx1g", "-Dfile.encoding=UTF-8")
+                // JCEF 在 JDK 16+ 的 macOS 上需要以下 --add-opens（jcefgithub README 明确要求）：
+                // JCEF 窗口渲染模式通过反射访问 macOS 专属的 AWT 内部类（sun.lwawt.macosx）
+                // 来嵌入 Chromium 窗口，强封装模块系统下必须显式打开。
+                // Windows 不需要这些参数（使用不同的原生窗口嵌入机制）。
+                jvmArgs += listOf(
+                    "-Xmx1g",
+                    "-Dfile.encoding=UTF-8",
+                    "--add-opens", "java.desktop/sun.awt=ALL-UNNAMED",
+                    "--add-opens", "java.desktop/sun.lwawt=ALL-UNNAMED",
+                    "--add-opens", "java.desktop/sun.lwawt.macosx=ALL-UNNAMED",
+                )
                 // 构建号（CFBundleVersion），与 packageVersion 分开
                 packageBuildVersion = System.getenv("LINGXI_VERSION_NAME") ?: "1.0.0"
             }

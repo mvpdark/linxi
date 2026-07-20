@@ -33,51 +33,57 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImagePainter
 import coil3.compose.rememberAsyncImagePainter
-import javafx.application.Platform
-import javafx.beans.value.ChangeListener
-import javafx.concurrent.Worker
-import javafx.embed.swing.JFXPanel
-import javafx.scene.Scene
-import javafx.scene.web.WebEngine
-import javafx.scene.web.WebView
+import io.github.trethore.jcefgithub.CefAppBuilder
+import io.github.trethore.jcefgithub.MavenCefAppHandlerAdapter
+import io.github.trethore.jcefgithub.impl.progress.ConsoleProgressHandler
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import kotlin.concurrent.thread
+import org.cef.CefApp
+import org.cef.CefClient
+import org.cef.browser.CefBrowser
+import org.cef.browser.CefFrame
+import org.cef.handler.CefLoadHandler
+import org.cef.handler.CefLoadHandlerAdapter
 import lingxi_clients.shared.generated.resources.Res
 import top.mvpdark.lingxi.core.util.PlatformLogger
+import java.awt.BorderLayout
+import java.awt.Color as AwtColor
 import java.awt.Desktop
 import java.io.File
 import java.net.URI
 import java.util.Base64
-import java.util.concurrent.CountDownLatch
-import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import javax.swing.JPanel
+import kotlin.concurrent.thread
 
 /**
- * Desktop 全景查看器（内嵌 JavaFX WebView 方案）。
+ * Desktop 全景查看器（内嵌 JCEF / Chromium 方案）。
  *
  * 工作流程：
  * 1. 将 pannellum.js、pannellum.css、panorama_data.js（base64 图片）写入临时目录，
  *    生成 index.html 引用上述文件（与旧方案共用 preparePanoramaFiles）
- * 2. 全局一次性初始化 JavaFX 工具包（Platform.startup + setImplicitExit(false)）
- * 3. 通过 SwingPanel 内嵌 JFXPanel，在 JavaFX Application Thread 上创建
- *    WebView + WebEngine（支持 WebGL，可拖拽交互 360° 全景）
- * 4. WebEngine 加载 file:/// URL，监听 LoadWorker 状态驱动 Compose 加载/错误 UI
+ * 2. 全局一次性初始化 JCEF（CefAppBuilder 从 classpath 提取原生库 → CefApp）
+ * 3. 通过 SwingPanel 内嵌 CefBrowser 的 AWT UI 组件（窗口渲染模式，GPU 加速）
+ * 4. CefBrowser 加载 file:/// URL，监听 CefLoadHandler 状态驱动 Compose 加载/错误 UI
  *
- * 降级策略：若 JavaFX 初始化失败（依赖缺失、原生库加载失败等），
+ * 降级策略：若 JCEF 初始化失败（原生库缺失、平台不支持等），
  * 自动回退为「系统默认浏览器打开」方案（旧行为）。
  *
  * WebGL 说明：Pannellum 渲染等距柱状全景（equirectangular）必须依赖 WebGL。
- * 官方 OpenJFX 构建的 WebView 未启用 WebGL（JDK-8089881 长期未解决，
- * 实测 21.0.4 / WebKit 617.1 下 getContext('webgl') 返回 null），
- * 因此页面加载成功后会在 FX 线程主动探测 WebGL；不可用时展示明确错误
- * 并引导用户改用系统浏览器（具备完整 WebGL），避免出现黑屏静默失败。
+ * 旧 JavaFX WebView 方案的官方 OpenJFX 构建不支持 WebGL（JDK-8089881），
+ * 因此改用 JCEF —— 内嵌完整 Chromium 引擎，原生支持 WebGL / GPU 加速，
+ * 无需运行时探测 WebGL 可用性。
  *
  * 线程模型：
- * - 文件准备：Dispatchers.IO
- * - JFXPanel 创建：Compose 组合线程（Desktop 上即 AWT EDT）
- * - WebView/Scene/Engine 操作：一律 Platform.runLater 到 JavaFX Application Thread
- * - LoadWorker 状态回调在 FX 线程触发，直接写 Compose snapshot state 是线程安全的
+ * - 文件准备 + JCEF 初始化：Dispatchers.IO（原生库提取为 IO 密集型）
+ * - CefBrowser 创建：SwingPanel factory（Desktop 上即 AWT EDT）
+ * - CefLoadHandler 回调在 CEF 线程触发，写 Compose snapshot state 线程安全
+ *
+ * 原生库分发：
+ * - jcefgithub 引导器从 classpath 的 jcef-natives-<platform> jar 中提取
+ *   CEF/Chromium 原生库到 ~/.lingxi/jcef/ 目录（首次运行提取，后续复用）
+ * - macOS 上自动执行 unquarantine 以避免 Gatekeeper 拦截
+ * - CefAppBuilder 内部注册了 JVM shutdown hook 自动调用 CefApp.dispose()
  *
  * 注意：pannellum.js 包含 $a 等 JS 变量名，不能内联到 Kotlin """...""" 模板字符串
  * （Kotlin 会将 $a 解析为模板表达式导致编译错误），必须作为独立文件通过
@@ -94,27 +100,34 @@ actual fun PanoramaViewer(
     var status by remember { mutableStateOf(PanoramaStatus.Preparing) }
     var error by remember { mutableStateOf<String?>(null) }
     var htmlFile by remember { mutableStateOf<File?>(null) }
-    var webEngine by remember { mutableStateOf<WebEngine?>(null) }
-    // JavaFX 不可用时的降级标记：回退为系统浏览器打开
+    var cefBrowser by remember { mutableStateOf<CefBrowser?>(null) }
+    var cefClient by remember { mutableStateOf<CefClient?>(null) }
+    // JCEF 初始化完成标记：仅在 init 成功后才渲染 SwingPanel，避免 factory
+    // 中 CefApp.getInstance() 在 init 完成前被调用而抛异常
+    var jcefReady by remember { mutableStateOf(false) }
+    // JCEF 不可用时的降级标记：回退为系统浏览器打开
     var useSystemBrowser by remember { mutableStateOf(false) }
     var browserOpened by remember { mutableStateOf(false) }
 
-    // 1. 准备全景图文件（IO 线程），然后确保 JavaFX 工具包已初始化
+    // 1. 准备全景图文件（IO 线程），然后初始化 JCEF（IO 线程，原生库提取为 IO 密集型）
     LaunchedEffect(imageUrl) {
         if (imageUrl.isEmpty()) return@LaunchedEffect
         error = null
         status = PanoramaStatus.Preparing
         browserOpened = false
+        jcefReady = false
         try {
             val file = withContext(Dispatchers.IO) { preparePanoramaFiles(imageUrl) }
             htmlFile = file
-            // JavaFX 全局只需初始化一次；失败会抛异常 → 走 catch 降级
-            ensureJavaFXInitialized()
+            // JCEF 全局只需初始化一次；build() 线程安全且幂等（返回同一实例）。
+            // 失败会抛异常 → 走 catch 降级
+            withContext(Dispatchers.IO) { ensureJcefInitialized() }
+            jcefReady = true
         } catch (e: Throwable) {
-            PlatformLogger.e("PanoramaViewer", "Embedded JavaFX unavailable, fallback to system browser", e)
+            PlatformLogger.e("PanoramaViewer", "Embedded JCEF unavailable, fallback to system browser", e)
             val file = htmlFile
             if (file != null) {
-                // 文件已就绪，仅 JavaFX 失败 → 系统浏览器降级
+                // 文件已就绪，仅 JCEF 失败 → 系统浏览器降级
                 runCatching { openInBrowser(file) }
                     .onSuccess {
                         useSystemBrowser = true
@@ -131,37 +144,37 @@ actual fun PanoramaViewer(
         }
     }
 
-    // 2. WebEngine 与 HTML 文件都就绪后，在 FX 线程加载 file:/// URL
-    LaunchedEffect(webEngine, htmlFile, useSystemBrowser) {
-        val engine = webEngine ?: return@LaunchedEffect
+    // 2. CefBrowser 与 HTML 文件都就绪后，加载 file:/// URL
+    //    CefBrowser.loadURL 内部派发到 CEF 消息循环，可从任意线程调用
+    LaunchedEffect(cefBrowser, htmlFile, useSystemBrowser) {
+        val browser = cefBrowser ?: return@LaunchedEffect
         val file = htmlFile ?: return@LaunchedEffect
         if (useSystemBrowser) return@LaunchedEffect
         status = PanoramaStatus.Loading
-        Platform.runLater {
-            // toURI().toURL() 在 Windows 上生成正确的 file:///C:/... 形式
-            engine.load(file.toURI().toURL().toExternalForm())
-        }
+        // toURI().toURL() 在 Windows 上生成正确的 file:///C:/... 形式
+        browser.loadURL(file.toURI().toURL().toExternalForm())
     }
 
-    // 3. 离开组合时停止 WebView 渲染，释放 WebKit 原生资源
+    // 3. 离开组合时关闭浏览器、释放 CefClient（CefApp 全局单例由 shutdown hook 释放）
     DisposableEffect(Unit) {
         onDispose {
-            val engine = webEngine
-            if (engine != null) {
-                runCatching {
-                    Platform.runLater {
-                        // load(null)：取消并复位 LoadWorker，停止加载与渲染
-                        engine.load(null)
-                    }
-                }
+            val browser = cefBrowser
+            val client = cefClient
+            if (browser != null) {
+                runCatching { browser.close(false) }
             }
+            if (client != null) {
+                runCatching { client.dispose() }
+            }
+            cefBrowser = null
+            cefClient = null
         }
     }
 
     // 4. 临时目录清理绑定到当前目录对象：htmlFile 切换（同会话换全景图）时，
     //    旧 key 的 onDispose 先执行删除旧目录，新 key 的 Effect 再启动；
     //    离开组合时清理当前目录，避免旧 panorama_* 目录泄漏。
-    //    WebKit 释放文件句柄是异步的，稍作延迟再删除以提高 Windows 上的成功率；
+    //    Chromium 释放文件句柄是异步的，稍作延迟再删除以提高 Windows 上的成功率；
     //    即使删除失败，仍由全局唯一的 JVM shutdown hook 在退出时兜底清理，不会泄漏。
     val panoramaDir = htmlFile?.parentFile
     DisposableEffect(panoramaDir) {
@@ -195,58 +208,65 @@ actual fun PanoramaViewer(
     }
 
     Box(modifier = modifier.background(Color.Black)) {
-        // JavaFX 初始化成功且文件就绪后才内嵌 WebView
-        if (htmlFile != null && error == null) {
+        // JCEF 初始化成功且文件就绪后才内嵌 CefBrowser
+        if (jcefReady && htmlFile != null && error == null) {
             SwingPanel(
                 factory = {
-                    val panel = JFXPanel()
-                    panel.background = java.awt.Color.BLACK
-                    // WebView 必须在 JavaFX Application Thread 上创建
-                    Platform.runLater {
-                        try {
-                            val webView = WebView()
-                            val engine = webView.engine
-                            engine.isJavaScriptEnabled = true
-                            // 监听页面加载状态，驱动 Compose 侧的加载/错误覆盖层。
-                            // 回调在 FX 线程触发，写 Compose snapshot state 线程安全。
-                            engine.loadWorker.stateProperty().addListener(
-                                ChangeListener { _, _, newState ->
-                                    when (newState) {
-                                        Worker.State.SUCCEEDED -> {
-                                            // Pannellum 等距柱状全景必须依赖 WebGL 渲染；
-                                            // 官方 OpenJFX 构建的 WebView 未启用 WebGL，
-                                            // 主动探测以避免黑屏静默失败。
-                                            val webglOk = runCatching {
-                                                engine.executeScript(
-                                                    "(function(){var c=document.createElement('canvas');" +
-                                                        "return !!(c.getContext('webgl')||c.getContext('experimental-webgl'));})()",
-                                                ) as? Boolean
-                                            }.getOrNull() ?: false
-                                            if (webglOk) {
-                                                status = PanoramaStatus.Ready
-                                            } else {
-                                                status = PanoramaStatus.Error
-                                                error = "内嵌浏览器不支持 WebGL，无法渲染 360° 全景图，请在系统浏览器中打开"
-                                            }
-                                        }
-                                        Worker.State.FAILED -> {
-                                            status = PanoramaStatus.Error
-                                            error = "全景图页面加载失败"
-                                        }
-                                        else -> Unit
+                    try {
+                        val app = CefApp.getInstance()
+                        val client = app.createClient()
+
+                        // 监听页面加载状态，驱动 Compose 侧的加载/错误覆盖层。
+                        // 回调在 CEF 线程触发，写 Compose snapshot state 线程安全。
+                        client.addLoadHandler(
+                            object : CefLoadHandlerAdapter() {
+                                override fun onLoadingStateChange(
+                                    browser: CefBrowser?,
+                                    isLoading: Boolean,
+                                    canGoBack: Boolean,
+                                    canGoForward: Boolean,
+                                ) {
+                                    if (!isLoading) {
+                                        // 页面加载完成。JCEF 基于 Chromium，原生支持 WebGL，
+                                        // 无需像 JavaFX WebView 那样主动探测 WebGL 可用性。
+                                        status = PanoramaStatus.Ready
                                     }
-                                },
-                            )
-                            // WebView 作为 Scene 根节点，会随 JFXPanel 尺寸自动缩放
-                            panel.scene = Scene(webView)
-                            webEngine = engine
-                        } catch (t: Throwable) {
-                            PlatformLogger.e("PanoramaViewer", "Create JavaFX WebView failed", t)
-                            error = "初始化内嵌浏览器失败: ${t.message}"
-                            status = PanoramaStatus.Error
-                        }
+                                }
+
+                                override fun onLoadError(
+                                    browser: CefBrowser?,
+                                    frame: CefFrame?,
+                                    errorCode: CefLoadHandler.ErrorCode?,
+                                    errorText: String?,
+                                    failedUrl: String?,
+                                ) {
+                                    // 仅处理主帧错误，忽略子资源错误（如图片加载失败）
+                                    if (frame?.isMain == true) {
+                                        status = PanoramaStatus.Error
+                                        error = "全景图页面加载失败: ${errorText ?: errorCode?.toString() ?: "未知错误"}"
+                                    }
+                                }
+                            },
+                        )
+
+                        // 创建浏览器：windowed 渲染（isOffscreenRendered=false）
+                        // 以启用 GPU 加速的 WebGL（Pannellum 全景渲染必需）
+                        val browser = client.createBrowser("", false, false)
+                        cefBrowser = browser
+                        cefClient = client
+
+                        // CefBrowser.getUIComponent() 返回 AWT Component（窗口渲染模式下为
+                        // 重量级 Canvas），用 JPanel 包裹以设置黑色背景
+                        val panel = JPanel(BorderLayout())
+                        panel.background = AwtColor.BLACK
+                        panel.add(browser.getUIComponent(), BorderLayout.CENTER)
+                        panel
+                    } catch (t: Throwable) {
+                        PlatformLogger.e("PanoramaViewer", "Create JCEF browser failed", t)
+                        error = "初始化内嵌浏览器失败: ${t.message}"
+                        status = PanoramaStatus.Error
+                        JPanel().apply { background = AwtColor.BLACK }
                     }
-                    panel
                 },
                 modifier = Modifier.fillMaxSize(),
             )
@@ -340,10 +360,10 @@ private object PanoramaTempDir {
 
 /** 全景查看器状态机 */
 private enum class PanoramaStatus {
-    /** 正在写临时文件 / 初始化 JavaFX */
+    /** 正在写临时文件 / 初始化 JCEF */
     Preparing,
 
-    /** WebView 正在加载页面 */
+    /** CefBrowser 正在加载页面 */
     Loading,
 
     /** 页面加载完成，可交互 */
@@ -447,38 +467,42 @@ private fun SystemBrowserFallback(
     }
 }
 
-/** JavaFX 工具包是否已初始化（全局只需一次） */
-private val javafxInitialized = AtomicBoolean(false)
+/** JCEF 是否已初始化（全局只需一次） */
+private val jcefInitialized = AtomicBoolean(false)
 
 /**
- * 初始化 JavaFX 工具包（线程安全，全局仅执行一次）。
+ * 初始化 JCEF（线程安全，全局仅执行一次）。
  *
- * 必须在创建任何 JavaFX 组件（JFXPanel / WebView）之前调用成功。
- * 初始化失败（如 JavaFX 依赖缺失、原生库加载失败）会抛出异常，
+ * 使用 jcefgithub 的 CefAppBuilder：
+ * 1. 从 classpath 的 jcef-natives-<platform> jar 提取 CEF/Chromium 原生库
+ *    到 ~/.lingxi/jcef/（首次提取，后续复用；macOS 自动 unquarantine）
+ * 2. 加载原生库（jawt / libcef / jcef）并初始化 CefApp
+ * 3. CefAppBuilder 内部注册 JVM shutdown hook 自动 dispose
+ *
+ * 必须在创建任何 CefBrowser 之前调用成功。
+ * 初始化失败（如原生库缺失、平台不支持）会抛异常，
  * 调用方据此降级为系统浏览器方案。
+ *
+ * 窗口渲染模式（windowless_rendering_enabled=false）：
+ * 启用 GPU 硬件加速的 WebGL，Pannellum 360° 全景渲染必需。
+ * 对应 CefBrowser.getUIComponent() 返回重量级 AWT Canvas，
+ * 与 SwingPanel 集成方式同旧 JavaFX JFXPanel。
  */
-private fun ensureJavaFXInitialized() {
-    if (javafxInitialized.get()) return
-    synchronized(javafxInitialized) {
-        if (javafxInitialized.get()) return
-        val latch = CountDownLatch(1)
-        try {
-            Platform.startup {
-                // 防止最后一个 JavaFX 窗口关闭时工具包自动退出，
-                // 否则后续 Platform.runLater 任务会被拒绝执行
-                Platform.setImplicitExit(false)
-                latch.countDown()
-            }
-        } catch (e: IllegalStateException) {
-            // 工具包已被初始化（防御性处理，理论上不会走到）
-            Platform.setImplicitExit(false)
-            javafxInitialized.set(true)
-            return
-        }
-        if (!latch.await(10, TimeUnit.SECONDS)) {
-            throw IllegalStateException("JavaFX 工具包初始化超时")
-        }
-        javafxInitialized.set(true)
+private fun ensureJcefInitialized() {
+    if (jcefInitialized.get()) return
+    synchronized(jcefInitialized) {
+        if (jcefInitialized.get()) return
+        val installDir = File(System.getProperty("user.home"), ".lingxi" + File.separator + "jcef")
+        val builder = CefAppBuilder()
+        builder.setInstallDir(installDir)
+        builder.setProgressHandler(ConsoleProgressHandler())
+        // 窗口渲染模式（非 OSR）：启用 GPU 加速的 WebGL
+        builder.getCefSettings().windowless_rendering_enabled = false
+        // macOS 兼容性：必须通过 setAppHandler 设置（不能直接调 CefApp.addAppHandler）
+        builder.setAppHandler(object : MavenCefAppHandlerAdapter() {})
+        // build() 线程安全且幂等：安装原生库 → 初始化 CefApp → 注册 shutdown hook
+        builder.build()
+        jcefInitialized.set(true)
     }
 }
 
