@@ -15,6 +15,7 @@ import top.mvpdark.lingxi.data.repository.PanoramaRepository
 /**
  * 全景图 UI 状态。
  */
+@Suppress("ArrayInDataClass")
 data class PanoramaUiState(
     val step: PanoramaViewModel.Step = PanoramaViewModel.Step.Upload,
     val originalBytes: ByteArray? = null,
@@ -53,10 +54,12 @@ class PanoramaViewModel(
                         error = null,
                     )
                 }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
             } catch (e: Throwable) {
                 PlatformLogger.e("PanoramaViewModel", "onPickImage failed", e)
                 _uiState.update {
-                    it.copy(error = e.message ?: "图片加载失败")
+                    it.copy(error = e.toUserMessage())
                 }
             } finally {
                 isProcessing.value = false
@@ -139,9 +142,5 @@ class PanoramaViewModel(
     /** 清除错误。 */
     fun clearError() {
         _uiState.update { it.copy(error = null) }
-    }
-
-    override fun onCleared() {
-        super.onCleared()
     }
 }

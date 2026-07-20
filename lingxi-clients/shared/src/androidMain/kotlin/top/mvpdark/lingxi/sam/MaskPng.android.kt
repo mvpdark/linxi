@@ -22,10 +22,12 @@ import java.io.ByteArrayOutputStream
  */
 actual fun maskToPngBase64(mask: ByteArray, width: Int, height: Int): String {
     if (mask.isEmpty() || width <= 0 || height <= 0) return ""
-    require(mask.size <= width * height) {
-        "mask size ${mask.size} exceeds ${width}x${height}=${width * height}"
-    }
     return runCatching {
+        // 尺寸校验放在 runCatching 内：与 KDoc"失败返回空字符串"的契约保持一致，
+        // 避免超限直接抛 IllegalArgumentException（R19）
+        require(mask.size <= width * height) {
+            "mask size ${mask.size} exceeds ${width}x${height}=${width * height}"
+        }
         // 1. 创建 ARGB_8888 Bitmap
         val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
         try {

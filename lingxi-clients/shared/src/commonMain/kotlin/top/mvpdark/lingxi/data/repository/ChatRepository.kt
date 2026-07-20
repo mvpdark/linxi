@@ -25,7 +25,6 @@ import top.mvpdark.lingxi.data.model.AuthFrame
 import top.mvpdark.lingxi.data.model.ChatFrame
 import top.mvpdark.lingxi.data.model.ChatMessage
 import top.mvpdark.lingxi.data.model.ChatSession
-import top.mvpdark.lingxi.data.model.HistoryResponse
 import top.mvpdark.lingxi.data.model.SessionListResponse
 
 /**
@@ -71,13 +70,6 @@ class ChatRepository(
     /** 取消置顶会话。后端用 POST /api/sessions/{id}/unpin。 */
     suspend fun unpinSession(sessionId: String) {
         apiClient.httpClient.post("/api/sessions/$sessionId/unpin")
-    }
-
-    /** 加载历史消息。后端返回 {history: [...]}。 */
-    suspend fun getHistory(sessionId: String): List<ChatMessage> {
-        val response: HistoryResponse =
-            apiClient.httpClient.get("/api/sessions/$sessionId/history").body()
-        return response.history
     }
 
     /**

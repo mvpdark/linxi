@@ -125,6 +125,9 @@ actual fun PanoramaViewer(
         status = PanoramaStatus.Preparing
         browserOpened = false
         jcefReady = false
+        // 清空上一张全景图的文件引用：否则新图 prepare 失败时，catch 分支会拿到
+        // 旧 htmlFile 并把「旧全景图」降级到系统浏览器打开（内容错配）
+        htmlFile = null
         try {
             val file = withContext(Dispatchers.IO) { preparePanoramaFiles(imageUrl) }
             htmlFile = file
@@ -159,7 +162,18 @@ actual fun PanoramaViewer(
     //    的 z-order 遮挡 Compose 覆盖层），等 Pannellum load 事件（纹理上传完成）
     //    通过 JS 桥回调后再渲染 SwingPanel。
     LaunchedEffect(jcefReady, htmlFile, useSystemBrowser) {
-        if (!jcefReady || useSystemBrowser) return@LaunchedEffect
+        if (!jcefReady || useSystemBrowser) {
+            // 降级到系统浏览器时（用户在错误覆盖层点击「在系统浏览器中打开」），
+            // 关闭仍在后台运行的内嵌浏览器，避免 WebGL 渲染空转 + 文件句柄占用
+            // 导致临时目录无法删除
+            if (useSystemBrowser) {
+                cefBrowser?.let { runCatching { it.close(false) } }
+                cefClient?.let { runCatching { it.dispose() } }
+                cefBrowser = null
+                cefClient = null
+            }
+            return@LaunchedEffect
+        }
         val file = htmlFile ?: return@LaunchedEffect
 
         // 关闭旧浏览器（切换全景图时 htmlFile 变化触发）
@@ -431,6 +445,9 @@ actual fun PanoramaViewer(
 /** 全景图临时目录管理：统一放在 {java.io.tmpdir}/lingxi-panorama/ 下，全局只注册一次 JVM shutdown hook。 */
 private object PanoramaTempDir {
     private val registered = AtomicBoolean(false)
+    // 目录序号：同一毫秒内连续分配（快速切换全景图）时保证目录名唯一，避免
+    // 两个查看器共用同一目录互相覆盖文件
+    private val sequence = java.util.concurrent.atomic.AtomicInteger(0)
     private val parentDir: File = File(
         System.getProperty("java.io.tmpdir"),
         "lingxi-panorama"
@@ -443,7 +460,10 @@ private object PanoramaTempDir {
                 parentDir.deleteRecursively()
             })
         }
-        val dir = File(parentDir, "panorama_${System.currentTimeMillis()}")
+        val dir = File(
+            parentDir,
+            "panorama_${System.currentTimeMillis()}_${sequence.incrementAndGet()}"
+        )
         dir.mkdirs()
         return dir
     }
@@ -712,8 +732,7 @@ private suspend fun readImageBytes(imageUrl: String): ByteArray {
                 Base64.getDecoder().decode(base64Data)
             }
             imageUrl.startsWith("file://") -> {
-                val path = imageUrl.removePrefix("file://")
-                File(path).readBytes()
+                resolveFileUrl(imageUrl).readBytes()
             }
             imageUrl.startsWith("http://") || imageUrl.startsWith("https://") -> {
                 val url = URI(imageUrl).toURL()
@@ -721,7 +740,15 @@ private suspend fun readImageBytes(imageUrl: String): ByteArray {
                 conn.connectTimeout = 15000
                 conn.readTimeout = 30000
                 conn.useCaches = false
-                conn.inputStream.use { it.readBytes() }
+                try {
+                    val responseCode = conn.responseCode
+                    if (responseCode != java.net.HttpURLConnection.HTTP_OK) {
+                        throw java.io.IOException("HTTP $responseCode")
+                    }
+                    conn.inputStream.use { it.readBytes() }
+                } finally {
+                    conn.disconnect()
+                }
             }
             else -> {
                 try {
@@ -732,6 +759,22 @@ private suspend fun readImageBytes(imageUrl: String): ByteArray {
             }
         }
     }
+}
+
+/**
+ * 解析 file:// URL 为本地 [File]。
+ *
+ * 优先按 URI 规范解析（正确处理 file:///C:/... 三斜杠 Windows 形式，
+ * 即 LocalMessageStore.saveImage 产生的本地缓存路径）；URI 解析失败时
+ * 回退为前缀剥离（兼容 file://C:/... 两斜杠与纯路径）。
+ * 直接 removePrefix("file://") 会把 file:///C:/x 解析为 /C:/x，在 Windows
+ * 上被 File 当作「当前盘符:\C:\x」，必然找不到文件（与 W5 同类 bug）。
+ */
+private fun resolveFileUrl(url: String): File {
+    runCatching { return File(URI(url)) }
+    val path = url.removePrefix("file:///").removePrefix("file://")
+    // Windows 下 /C:/... 形式需去掉前导斜杠
+    return if (path.matches(Regex("^/[A-Za-z]:/.*"))) File(path.substring(1)) else File(path)
 }
 
 /**

@@ -38,7 +38,17 @@ actual class LocalMessageStore actual constructor(context: PlatformContext) {
     private val messagesDir: File get() = File(baseDir, "messages").apply { mkdirs() }
     private val imagesDir: File get() = File(baseDir, "images").apply { mkdirs() }
 
-    private fun messageFile(sessionId: String): File = File(messagesDir, "$sessionId.json")
+    private fun messageFile(sessionId: String): File =
+        File(messagesDir, "${sanitizeSessionId(sessionId)}.json")
+
+    /**
+     * 清洗 sessionId 中的路径不安全字符，防止服务端下发的会话 ID 含
+     * `../`、路径分隔符等导致文件被写到 messages 目录之外（路径穿越）。
+     */
+    private fun sanitizeSessionId(sessionId: String): String {
+        val cleaned = sessionId.replace(Regex("[^A-Za-z0-9_\\-]"), "_")
+        return cleaned.ifBlank { "unknown_session" }
+    }
 
     actual suspend fun saveMessage(sessionId: String, message: ChatMessage) {
         mutex.withLock {

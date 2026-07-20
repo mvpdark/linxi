@@ -234,11 +234,12 @@ class ApngParser {
         }
 
         // 处理默认帧（IDAT 在第一个 fcTL 之前，是静态 fallback）
-        // APNG 规范：如果第一个 fcTL 出现在 IDAT 之后，则 IDAT 是静态 fallback，
-        // 作为默认图像（非动画第一帧）
+        // APNG 规范：如果第一个 fcTL 出现在 IDAT 之后，则 IDAT 是默认图像，
+        // 仅供不支持动画的解码器显示，不属于动画序列，不能插入帧列表。
+        // 仅当没有解析出任何动画帧时才用默认帧兜底，保证有内容可显示。
         // 注意：fcTL 在 IDAT 之前时，IDAT 已被 currentFrameIdatChunks 处理，
         // 不会进入 defaultIdatChunks，所以这里无需再判断 firstFctlIndex < firstIdatIndex
-        if (defaultIdatChunks.isNotEmpty()) {
+        if (defaultIdatChunks.isNotEmpty() && frames.isEmpty()) {
             val defaultFrame = buildDefaultFrame(
                 idatChunks = defaultIdatChunks,
                 width = width,
@@ -246,7 +247,7 @@ class ApngParser {
                 ihdrRaw = ihdrRaw,
                 ancillaryChunks = ancillaryChunks,
             )
-            frames.add(0, defaultFrame)
+            frames.add(defaultFrame)
         }
 
         return ApngData(
@@ -299,6 +300,7 @@ class ApngParser {
      * 返回 (width, height)。
      */
     private fun parseIhdr(data: ByteArray): Pair<Int, Int> {
+        require(data.size >= 8) { "IHDR chunk 数据长度不足: ${data.size}" }
         val width = readInt32(data, 0)
         val height = readInt32(data, 4)
         return Pair(width, height)
@@ -309,6 +311,7 @@ class ApngParser {
      * 返回 (num_frames, num_plays)。
      */
     private fun parseActl(data: ByteArray): Pair<Int, Int> {
+        require(data.size >= 8) { "acTL chunk 数据长度不足: ${data.size}" }
         val numFrames = readInt32(data, 0)
         val numPlays = readInt32(data, 4)
         return Pair(numFrames, numPlays)
@@ -329,6 +332,8 @@ class ApngParser {
     )
 
     private fun parseFctl(data: ByteArray): FrameControl {
+        // fcTL chunk data 固定 26 字节（含 4 字节帧序号），过短说明文件损坏
+        require(data.size >= 26) { "fcTL chunk 数据长度不足: ${data.size}" }
         // fcTL chunk data 格式（APNG 规范）：
         // offset 0:  sequence_number (4 bytes) — 帧序号，必须跳过
         // offset 4:  width (4 bytes)

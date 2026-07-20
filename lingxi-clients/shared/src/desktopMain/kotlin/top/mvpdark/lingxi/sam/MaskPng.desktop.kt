@@ -19,14 +19,17 @@ import javax.imageio.ImageIO
  * @param mask 二值 mask（>0 视为前景）
  * @param width mask 宽度
  * @param height mask 高度
- * @return base64 编码的 PNG 图片（不含 `data:image/png;base64,` 前缀）
+ * @return base64 编码的 PNG 图片（不含 `data:image/png;base64,` 前缀）；
+ *         输入非法或编码失败时返回空字符串（与 Android 实现语义一致）
  */
 actual fun maskToPngBase64(mask: ByteArray, width: Int, height: Int): String {
     if (mask.isEmpty() || width <= 0 || height <= 0) {
         return ""
     }
-    require(mask.size <= width * height) {
-        "mask size ${mask.size} exceeds ${width}x${height}=${width * height}"
+    // 非法输入返回 "" 而非抛异常：与 Android 实现的失败语义保持一致，
+    // 避免单物体 mask 编码失败导致整个 segment 结果被 catch 降级为失败
+    if (mask.size > width * height) {
+        return ""
     }
 
     // 1. 创建 TYPE_INT_ARGB BufferedImage

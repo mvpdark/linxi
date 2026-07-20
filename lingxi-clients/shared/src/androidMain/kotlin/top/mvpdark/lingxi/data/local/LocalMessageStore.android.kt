@@ -8,6 +8,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
 import top.mvpdark.lingxi.core.network.PlatformContext
+import top.mvpdark.lingxi.core.util.PlatformLogger
 import top.mvpdark.lingxi.data.model.ChatMessage
 import java.io.File
 import java.security.MessageDigest
@@ -49,7 +50,15 @@ actual class LocalMessageStore actual constructor(context: PlatformContext) {
                 val existing = if (file.exists()) {
                     runCatching {
                         json.decodeFromString(messageListSerializer, file.readText())
-                    }.getOrDefault(emptyList())
+                    }.getOrElse { e ->
+                        // 文件损坏：先备份损坏文件再重建，而不是静默用空列表覆盖
+                        // 导致全部历史消息丢失；备份文件可供排查/人工恢复
+                        PlatformLogger.e(TAG, "消息文件损坏，备份后重建: ${file.name}", e)
+                        runCatching {
+                            file.copyTo(File(file.parentFile, "${file.name}.corrupted"), overwrite = true)
+                        }
+                        emptyList()
+                    }
                 } else {
                     emptyList()
                 }
@@ -67,7 +76,11 @@ actual class LocalMessageStore actual constructor(context: PlatformContext) {
                 } else {
                     runCatching {
                         json.decodeFromString(messageListSerializer, file.readText())
-                    }.getOrDefault(emptyList())
+                    }.getOrElse { e ->
+                        // 读取失败不再静默返回空列表，记录日志便于排查
+                        PlatformLogger.e(TAG, "读取消息失败: ${file.name}", e)
+                        emptyList()
+                    }
                 }
             }
         }
@@ -85,7 +98,18 @@ actual class LocalMessageStore actual constructor(context: PlatformContext) {
         return withContext(Dispatchers.IO) {
             val fileName = "${md5(url)}.jpg"
             val file = File(imagesDir, fileName)
-            file.writeBytes(bytes)
+            // 先写临时文件再原子重命名：避免并发写同一 URL 的图片时字节交错
+            // 产生截断文件，也避免崩溃留下半截图片（saveImage 不在 mutex 内）
+            val tmpFile = File(imagesDir, "$fileName.tmp")
+            try {
+                tmpFile.writeBytes(bytes)
+                if (!tmpFile.renameTo(file)) {
+                    // 个别 ROM rename 失败时退化为直接写入
+                    file.writeBytes(bytes)
+                }
+            } finally {
+                if (tmpFile.exists()) tmpFile.delete()
+            }
             "file://${file.absolutePath}"
         }
     }
@@ -102,5 +126,9 @@ actual class LocalMessageStore actual constructor(context: PlatformContext) {
     private fun md5(input: String): String {
         val digest = MessageDigest.getInstance("MD5").digest(input.toByteArray())
         return digest.joinToString("") { "%02x".format(it.toInt() and 0xFF) }
+    }
+
+    private companion object {
+        private const val TAG = "LocalMessageStore"
     }
 }

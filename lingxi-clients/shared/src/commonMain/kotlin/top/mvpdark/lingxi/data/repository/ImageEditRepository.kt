@@ -13,6 +13,7 @@ import kotlinx.serialization.encodeToString
 import top.mvpdark.lingxi.core.network.ApiClient
 import top.mvpdark.lingxi.core.util.PlatformLogger
 import top.mvpdark.lingxi.core.util.runCatchingCancellable
+import top.mvpdark.lingxi.core.util.sanitizeMultipartFileName
 import top.mvpdark.lingxi.core.util.toUserMessage
 import top.mvpdark.lingxi.data.model.DetectedObject
 import top.mvpdark.lingxi.data.model.EditRegion
@@ -294,7 +295,7 @@ class ImageEditRepository(
         bytes: ByteArray,
         fileName: String,
     ) {
-        val safeFileName = fileName.replace("\"", "").replace("\r", "").replace("\n", "")
+        val safeFileName = sanitizeMultipartFileName(fileName)
         append(name, bytes, Headers.build {
             append(HttpHeaders.ContentDisposition, "form-data; name=\"$name\"; filename=\"$safeFileName\"")
             append(HttpHeaders.ContentType, guessContentType(safeFileName))

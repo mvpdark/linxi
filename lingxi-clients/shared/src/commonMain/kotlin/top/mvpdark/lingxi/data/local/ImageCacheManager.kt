@@ -4,6 +4,7 @@ import io.ktor.client.HttpClient
 import io.ktor.client.request.get
 import io.ktor.client.statement.bodyAsBytes
 import io.ktor.http.isSuccess
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -87,6 +88,9 @@ class ImageCacheManager(
 
                 else -> url
             }
+        } catch (e: CancellationException) {
+            // 协程取消不能吞掉：否则父作用域取消时下载任务无法及时停止
+            throw e
         } catch (e: Exception) {
             // 下载或保存失败时返回原始 URL，保证消息内容不丢失
             url

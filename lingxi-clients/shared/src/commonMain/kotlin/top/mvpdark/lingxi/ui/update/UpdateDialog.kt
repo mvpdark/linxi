@@ -152,7 +152,8 @@ private fun UpdateDialog(
                             )
                             Spacer(Modifier.height(8.dp))
                             LinearProgressIndicator(
-                                progress = { downloadProgress / 100f },
+                                // 防御安装器回报异常进度值（负数或超过 100）
+                                progress = { (downloadProgress / 100f).coerceIn(0f, 1f) },
                                 modifier = Modifier.fillMaxWidth(),
                             )
                         }

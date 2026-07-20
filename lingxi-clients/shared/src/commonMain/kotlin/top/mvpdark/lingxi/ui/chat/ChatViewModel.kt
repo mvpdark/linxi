@@ -11,6 +11,7 @@ import top.mvpdark.lingxi.data.model.AgentEvent
 import top.mvpdark.lingxi.data.model.ChatMessage
 import top.mvpdark.lingxi.data.model.ChatSession
 import top.mvpdark.lingxi.core.util.currentTimeMillis
+import top.mvpdark.lingxi.core.util.toUserMessage
 import top.mvpdark.lingxi.data.local.ImageCacheManager
 import top.mvpdark.lingxi.data.local.LocalMessageStore
 import top.mvpdark.lingxi.data.repository.ChatRepository
@@ -285,10 +286,16 @@ class ChatViewModel(
                 timestamp = "",
             )
             _uiState.update {
-                it.copy(
-                    currentSessionId = currentSessionId,
-                    messages = it.messages + userMessage,
-                )
+                // 发送准备期间（建会话/缓存图片）用户可能已切换到其他会话：
+                // 此时不抢占界面，用户消息仅落盘，避免消息出现在错误会话中
+                if (it.currentSessionId.isNotBlank() && it.currentSessionId != currentSessionId) {
+                    it
+                } else {
+                    it.copy(
+                        currentSessionId = currentSessionId,
+                        messages = it.messages + userMessage,
+                    )
+                }
             }
             // 用户消息保存到本地存储
             runCatching { localMessageStore.saveMessage(currentSessionId, userMessage) }
@@ -303,7 +310,7 @@ class ChatViewModel(
                 if (e is kotlinx.coroutines.CancellationException) throw e
                 _uiState.update {
                     it.copy(
-                        error = "发送失败: ${e.message}",
+                        error = "发送失败: ${e.toUserMessage()}",
                         emojiState = EmojiState.IDLE,
                     )
                 }
@@ -526,8 +533,26 @@ class ChatViewModel(
         viewModelScope.launch {
             runCatching { chatRepository.deleteSession(sessionId) }
             runCatching { localMessageStore.deleteSessionMessages(sessionId) }
-            _uiState.update {
-                it.copy(sessions = it.sessions.filterNot { s -> s.id == sessionId })
+            _uiState.update { state ->
+                val remaining = state.sessions.filterNot { s -> s.id == sessionId }
+                if (state.currentSessionId == sessionId) {
+                    // 删除的是当前打开的会话：回到新对话界面，
+                    // 避免残留已删除会话的消息、以及后续消息发往已删除会话
+                    state.copy(
+                        sessions = remaining,
+                        currentSessionId = "",
+                        messages = emptyList(),
+                        streamingText = "",
+                        agentStatus = null,
+                        agentEvents = emptyList(),
+                        pendingImages = emptyList(),
+                        agentEmojiPath = null,
+                        isSending = false,
+                        error = null,
+                    )
+                } else {
+                    state.copy(sessions = remaining)
+                }
             }
         }
     }

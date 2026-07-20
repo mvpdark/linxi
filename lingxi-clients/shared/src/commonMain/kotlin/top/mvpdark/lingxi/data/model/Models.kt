@@ -68,12 +68,6 @@ data class ChatSession(
     @SerialName("updated_at") val updatedAt: String = "",
 )
 
-/** 创建会话请求体。 */
-@Serializable
-data class CreateSessionRequest(
-    val title: String = "新对话",
-)
-
 /** 聊天消息。 */
 @Serializable
 data class ChatMessage(
@@ -136,17 +130,4 @@ data class AuthFrame(
 @Serializable
 data class SessionListResponse(
     val sessions: List<ChatSession> = emptyList(),
-)
-
-/** GET /api/sessions/{id}/history 响应。 */
-@Serializable
-data class HistoryResponse(
-    val history: List<ChatMessage> = emptyList(),
-)
-
-/** 通用后端响应包装。 */
-@Serializable
-data class ApiResult(
-    val ok: Boolean = false,
-    val error: String = "",
 )

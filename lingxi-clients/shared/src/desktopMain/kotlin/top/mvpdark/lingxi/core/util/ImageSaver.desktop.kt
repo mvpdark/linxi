@@ -5,7 +5,7 @@ import java.awt.Frame
 import java.io.File
 import java.io.IOException
 import java.net.HttpURLConnection
-import java.net.URL
+import java.net.URI
 import kotlin.io.encoding.Base64
 import kotlin.io.encoding.ExperimentalEncodingApi
 import kotlinx.coroutines.Dispatchers
@@ -60,7 +60,7 @@ actual class ImageSaver actual constructor(@Suppress("UNUSED_PARAMETER") context
     private fun readBytes(imageUrl: String): ByteArray {
         return when {
             imageUrl.startsWith("data:") -> decodeDataUrl(imageUrl)
-            imageUrl.startsWith("file://") -> File(imageUrl.removePrefix("file://")).readBytes()
+            imageUrl.startsWith("file://") -> resolveFileUrl(imageUrl).readBytes()
             imageUrl.startsWith("http://") || imageUrl.startsWith("https://") -> download(imageUrl)
             // 兜底：相对路径补全为完整 URL 后下载
             else -> download(UrlResolver.resolveImageUrl(imageUrl))
@@ -68,10 +68,27 @@ actual class ImageSaver actual constructor(@Suppress("UNUSED_PARAMETER") context
     }
 
     /**
+     * 解析 file:// URL 为本地 [File]。
+     *
+     * 优先按 URI 规范解析（正确处理 file:///C:/... 三斜杠 Windows 形式）；
+     * URI 解析失败时回退为前缀剥离（兼容 file://C:/... 两斜杠与纯路径）。
+     *
+     * 注意：直接 removePrefix("file://") 会把 file:///C:/x 解析为 /C:/x，
+     * 在 Windows 上被 File 当作「当前盘符:\C:\x」，必然找不到文件（与 W5 同类 bug）。
+     */
+    private fun resolveFileUrl(url: String): File {
+        runCatching { return File(java.net.URI(url)) }
+        // 回退：剥离 file:/// 或 file:// 前缀
+        val path = url.removePrefix("file:///").removePrefix("file://")
+        // Windows 下 /C:/... 形式需去掉前导斜杠
+        return if (path.matches(Regex("^/[A-Za-z]:/.*"))) File(path.substring(1)) else File(path)
+    }
+
+    /**
      * HttpURLConnection 下载网络图片（15s 连接超时，30s 读取超时）。
      */
     private fun download(url: String): ByteArray {
-        val connection = URL(url).openConnection() as HttpURLConnection
+        val connection = URI(url).toURL().openConnection() as HttpURLConnection
         connection.connectTimeout = 15_000
         connection.readTimeout = 30_000
         connection.instanceFollowRedirects = true

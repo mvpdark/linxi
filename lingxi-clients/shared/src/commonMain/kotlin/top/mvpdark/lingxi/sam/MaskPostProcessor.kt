@@ -42,6 +42,8 @@ object MaskPostProcessor {
         maxPoints: Int = 60,
     ): List<Pair<Float, Float>>? {
         if (mask.isEmpty() || width <= 0 || height <= 0) return null
+        // 防御：mask 尺寸不足 width*height 时直接返回，避免数组越界
+        if (mask.size < width * height) return null
 
         // 1. 8-连通域 BFS 标记，找最大连通域
         // 使用 IntArray 标记连通域（标签数远小于 Int.MAX_VALUE）。

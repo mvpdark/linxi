@@ -11,9 +11,15 @@ import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.Canvas
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.Paint
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -63,16 +69,16 @@ fun AnimatedEmoji(
         return
     }
 
-    // 解码所有帧到 ImageBitmap（在 Default 线程）
+    // 解码并按 fcTL 参数把所有帧合成到完整画布（在 Default 线程）
+    // 之前的实现直接拉伸显示每帧原始位图，忽略 xOffset/yOffset/blend/dispose，
+    // 对部分帧（局部更新）的 APNG 会渲染错位/花屏，此处按规范逐帧合成。
     val framesState = produceState<List<ImageBitmap>?>(initialValue = null, apngData) {
         value = withContext(Dispatchers.Default) {
-            apngData.frames.mapNotNull { frame ->
-                try {
-                    decodePngBytes(frame.pngBytes)
-                } catch (e: Exception) {
-                    PlatformLogger.e("AnimatedEmoji", "帧解码失败", e)
-                    null
-                }
+            try {
+                compositeApngFrames(apngData)
+            } catch (e: Exception) {
+                PlatformLogger.e("AnimatedEmoji", "帧合成失败", e)
+                null
             }
         }
     }
@@ -98,13 +104,19 @@ fun AnimatedEmoji(
     var currentFrame by remember(resourcePath) { mutableIntStateOf(0) }
 
     LaunchedEffect(resourcePath, frames.size) {
-        while (true) {
-            val frameDelay = apngData.frames.getOrNull(currentFrame)?.delayMs ?: 100
-            // 最小延迟 50ms，防止过快闪烁
-            val effectiveDelay = frameDelay.coerceAtLeast(50)
-            delay(effectiveDelay)
-            currentFrame = (currentFrame + 1) % frames.size
+        // numPlays = 0 表示无限循环；> 0 时播放指定次数后停在最后一帧（APNG 规范）
+        val maxLoops = if (apngData.numPlays <= 0) Int.MAX_VALUE else apngData.numPlays
+        var loop = 0
+        while (loop < maxLoops) {
+            for (index in frames.indices) {
+                currentFrame = index
+                val frameDelay = apngData.frames.getOrNull(index)?.delayMs ?: 100
+                // 最小延迟 50ms，防止过快闪烁
+                delay(frameDelay.coerceAtLeast(50))
+            }
+            loop++
         }
+        // 播放完毕：currentFrame 停留在最后一帧
     }
 
     Image(
@@ -113,6 +125,84 @@ fun AnimatedEmoji(
         modifier = modifier.size(size),
         contentScale = ContentScale.Fit,
     )
+}
+
+/**
+ * 按 APNG 规范将各帧合成到完整画布。
+ *
+ * 逐帧处理 fcTL 参数：
+ * - 按 xOffset/yOffset 把帧位图画到画布对应位置（不拉伸到全画布）
+ * - blend=SOURCE 覆盖目标区域（BlendMode.Src），blend=OVER 做 alpha 叠加（BlendMode.SrcOver）
+ * - dispose=BACKGROUND 在下一帧前清空帧区域，dispose=PREVIOUS 恢复上一帧画布
+ *
+ * @return 每帧合成后的完整画布快照（尺寸均为 APNG 画布尺寸）。
+ */
+private fun compositeApngFrames(apngData: ApngParser.ApngData): List<ImageBitmap> {
+    val canvasWidth = apngData.width
+    val canvasHeight = apngData.height
+    if (canvasWidth <= 0 || canvasHeight <= 0) return emptyList()
+
+    val canvasBitmap = ImageBitmap(canvasWidth, canvasHeight)
+    val canvas = Canvas(canvasBitmap)
+    val snapshots = mutableListOf<ImageBitmap>()
+    var previousCanvas: ImageBitmap? = null
+
+    for (frame in apngData.frames) {
+        // dispose=PREVIOUS 需要先保存当前画布，绘制后恢复
+        if (frame.disposeOp == ApngParser.DisposeOp.PREVIOUS) {
+            previousCanvas = ImageBitmap(canvasWidth, canvasHeight).also { copy ->
+                Canvas(copy).drawImage(canvasBitmap, Offset.Zero, Paint())
+            }
+        }
+
+        val frameBitmap = try {
+            decodePngBytes(frame.pngBytes)
+        } catch (e: Exception) {
+            PlatformLogger.e("AnimatedEmoji", "帧解码失败", e)
+            null
+        }
+        if (frameBitmap != null) {
+            val paint = Paint().apply {
+                blendMode = if (frame.blendOp == ApngParser.BlendOp.SOURCE) {
+                    BlendMode.Src
+                } else {
+                    BlendMode.SrcOver
+                }
+            }
+            canvas.drawImageRect(
+                image = frameBitmap,
+                srcOffset = IntOffset.Zero,
+                srcSize = IntSize(frameBitmap.width, frameBitmap.height),
+                dstOffset = IntOffset(frame.xOffset, frame.yOffset),
+                dstSize = IntSize(frame.width, frame.height),
+                paint = paint,
+            )
+        }
+
+        // 快照当前画布作为展示帧
+        snapshots += ImageBitmap(canvasWidth, canvasHeight).also { snapshot ->
+            Canvas(snapshot).drawImage(canvasBitmap, Offset.Zero, Paint())
+        }
+
+        // 应用 dispose 操作，为下一帧准备画布
+        when (frame.disposeOp) {
+            ApngParser.DisposeOp.BACKGROUND -> {
+                canvas.drawRect(
+                    left = frame.xOffset.toFloat(),
+                    top = frame.yOffset.toFloat(),
+                    right = (frame.xOffset + frame.width).toFloat(),
+                    bottom = (frame.yOffset + frame.height).toFloat(),
+                    paint = Paint().apply { blendMode = BlendMode.Clear },
+                )
+            }
+            ApngParser.DisposeOp.PREVIOUS -> {
+                previousCanvas?.let { canvas.drawImage(it, Offset.Zero, Paint()) }
+            }
+            // DisposeOp.NONE：保留画布，无需处理
+        }
+    }
+
+    return snapshots
 }
 
 /**

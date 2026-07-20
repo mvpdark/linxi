@@ -30,23 +30,19 @@ enum class EmojiState(val resourcePath: String) {
     HAPPY("files/emoji/animated/happy.apng"),
 }
 
-/**
- * 子 Agent 表情状态。
- *
- * 每个子 Agent 有 3 种状态（idle 为 null，不显示）。
- */
-enum class AgentEmojiState(val resourcePath: String?) {
+/** 子 Agent 表情状态（资源路径由 [getAgentEmojiPath] 按状态生成）。 */
+enum class AgentEmojiState {
     /** 待机（不显示表情）。 */
-    IDLE(null),
+    IDLE,
 
     /** 工作中。 */
-    WORKING(null), // 路径由 AgentType 决定
+    WORKING,
 
     /** 完成。 */
-    DONE(null),
+    DONE,
 
     /** 出错。 */
-    ERROR(null),
+    ERROR,
 }
 
 /**

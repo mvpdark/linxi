@@ -114,7 +114,13 @@ actual class ImageSaver actual constructor(private val context: PlatformContext)
             resolver.delete(uri, null, null)
             error("无法打开相册输出流")
         }
-        outputStream.use { it.write(bytes) }
+        try {
+            outputStream.use { it.write(bytes) }
+        } catch (e: Exception) {
+            // 写入中途失败（如存储空间不足）同样清理坏记录，避免相册残留坏图
+            resolver.delete(uri, null, null)
+            throw e
+        }
         return "已保存到相册：Pictures/Lingxi/$fileName"
     }
 

@@ -198,7 +198,20 @@ private fun millisToIso8601(millis: Long): String {
     // 从 1970-01-01 开始计算日期
     val (year, month, day) = epochDayToYmd(epochDay)
 
-    return "%04d-%02d-%02dT%02d:%02d:%02d".format(year, month, day, hour, minute, second)
+    // 手动拼接，避免 String.format 在阿拉伯语等 locale 下输出非 ASCII 数字
+    return buildString(20) {
+        append(year.toString().padStart(4, '0'))
+        append('-')
+        append(month.toString().padStart(2, '0'))
+        append('-')
+        append(day.toString().padStart(2, '0'))
+        append('T')
+        append(hour.toString().padStart(2, '0'))
+        append(':')
+        append(minute.toString().padStart(2, '0'))
+        append(':')
+        append(second.toString().padStart(2, '0'))
+    }
 }
 
 /**

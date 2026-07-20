@@ -43,7 +43,11 @@ compose.desktop {
             targetFormats(TargetFormat.Msi, TargetFormat.Exe, TargetFormat.Dmg)
             packageName = "Lingxi"
             // 版本号：优先从环境变量读取（CI 注入），本地默认 1.0.0
-            packageVersion = System.getenv("LINGXI_VERSION_NAME") ?: "1.0.0"
+            // 提取为局部变量，同时用于 packageVersion / packageBuildVersion /
+            // -Dlingxi.version（shared 模块 getAppVersion() 读取该系统属性，
+            // 未接线时打包后版本号永远显示默认值 1.0.0）
+            val appVersion = System.getenv("LINGXI_VERSION_NAME") ?: "1.0.0"
+            packageVersion = appVersion
             // 用英文描述 — WiX Toolset 处理中文字符时会出现 MalformedInputException: Input length = 1
             description = "Lingxi AI Assistant"
             copyright = "Copyright 2026 mvpdark. All rights reserved."
@@ -83,7 +87,8 @@ compose.desktop {
                 // 当前 ICO 文件导致 "Input length = 1" 错误，先用默认图标让 MSI 打包成功
                 // iconFile.set(project.layout.projectDirectory.file("resources/windows/lingxi.ico"))
                 // 捆绑 JRE，无需用户预装 Java
-                jvmArgs += listOf("-Xmx1g", "-Dfile.encoding=UTF-8")
+                // -Dlingxi.version：供 shared 模块 getAppVersion() 读取真实版本号
+                jvmArgs += listOf("-Xmx1g", "-Dfile.encoding=UTF-8", "-Dlingxi.version=$appVersion")
             }
 
             macOS {
@@ -100,12 +105,13 @@ compose.desktop {
                 jvmArgs += listOf(
                     "-Xmx1g",
                     "-Dfile.encoding=UTF-8",
+                    "-Dlingxi.version=$appVersion",
                     "--add-opens", "java.desktop/sun.awt=ALL-UNNAMED",
                     "--add-opens", "java.desktop/sun.lwawt=ALL-UNNAMED",
                     "--add-opens", "java.desktop/sun.lwawt.macosx=ALL-UNNAMED",
                 )
-                // 构建号（CFBundleVersion），与 packageVersion 分开
-                packageBuildVersion = System.getenv("LINGXI_VERSION_NAME") ?: "1.0.0"
+                // 构建号（CFBundleVersion），与 packageVersion 保持一致
+                packageBuildVersion = appVersion
             }
 
             // 通用配置

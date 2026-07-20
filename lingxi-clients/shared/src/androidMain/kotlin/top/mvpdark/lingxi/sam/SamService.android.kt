@@ -7,6 +7,7 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.os.Build
 import android.util.Log
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -246,16 +247,27 @@ actual class SamService actual constructor(private val context: PlatformContext)
                 Log.d(TAG, "pred_masks shape: ${shape.toList()}")
 
                 // 解析维度：[1, N, (C), H, W] 或 [N, (C), H, W] 或 [N, H, W]
-                val (hLow, wLow, _) = resolveMaskDims(shape)
+                // stride（每物体占用 float 数）与维度在同一函数内解析，语义单点定义
+                val (hLow, wLow, maskStride) = resolveMaskDims(shape)
+
+                // 防御：模型实际输出的物体数可能与请求数不一致（如某些模型固定输出 1 张 mask），
+                // 按输出数截断，避免 maskBuffer.position(i * maskStride) 越界
+                val modelObjectCount = when (shape.size) {
+                    5, 4 -> shape[1].toInt() // [1, N, ...]
+                    3 -> shape[0].toInt()    // [N, H, W]
+                    else -> n
+                }
+                if (modelObjectCount < n) {
+                    Log.w(TAG, "模型输出物体数($modelObjectCount)少于请求数($n)，超出的物体无分割结果")
+                }
 
                 // 按物体逐个读取 mask，避免大块 FloatArray 分配导致 OOM
-                val maskStride = hLow * wLow * resolveMaskChannelCount(shape)
                 val scratch = FloatArray(maskStride)
                 val maskBuffer = predMasksTensor.floatBuffer
 
                 // 5. 后处理：逐物体提取 mask → 上采样 → 多边形 / PNG
                 val results = mutableListOf<SamObject>()
-                for (i in 0 until n) {
+                for (i in 0 until minOf(n, modelObjectCount)) {
                     val maskSize = hLow * wLow
                     // 读取当前物体的 mask 到 scratch（按通道连续布局）
                     maskBuffer.position(i * maskStride)
@@ -303,6 +315,10 @@ actual class SamService actual constructor(private val context: PlatformContext)
                 }
 
                 SamSegmentResult(success = true, objects = results)
+            } catch (e: CancellationException) {
+                // 协程取消不属于分割失败，向上传播让协程正常结束，
+                // 否则取消会被吞掉并误报为"分割失败"
+                throw e
             } catch (e: Exception) {
                 Log.e(TAG, "segment failed", e)
                 val errorType = e::class.simpleName ?: "Exception"
@@ -380,10 +396,22 @@ actual class SamService actual constructor(private val context: PlatformContext)
         onProgress(progressStart, "复制 $assetName")
         destFile.parentFile?.mkdirs()
         val assetPath = "models/edgetam/$assetName"
-        context.androidContext.assets.open(assetPath).use { input ->
-            destFile.outputStream().use { output ->
-                input.copyTo(output)
+        // 先拷到临时文件，完成后原子重命名为正式文件：
+        // 避免复制过程中崩溃/被杀留下截断文件，下次被误判为"已存在"
+        // 而导致 ONNX 加载报难以排查的错误（R20）
+        val tmpFile = File(destDir, "$assetName.tmp")
+        try {
+            context.androidContext.assets.open(assetPath).use { input ->
+                tmpFile.outputStream().use { output ->
+                    input.copyTo(output)
+                }
             }
+            if (!tmpFile.renameTo(destFile)) {
+                // 个别 ROM rename 失败时退化为直接复制
+                tmpFile.copyTo(destFile, overwrite = true)
+            }
+        } finally {
+            if (tmpFile.exists()) tmpFile.delete()
         }
         onProgress(progressEnd, "$assetName 复制完成")
         return destFile
@@ -498,21 +526,6 @@ actual class SamService actual constructor(private val context: PlatformContext)
                 longArrayOf(2)
             }
         }.getOrDefault(longArrayOf(2))
-    }
-
-    /**
-     * 解析 mask 的通道数（与 resolveMaskDims 的维度语义保持一致）。
-     *
-     * - [1, N, C, H, W] → 5D：返回 C（shape[2]）
-     * - [1, N, H, W] → 4D：无独立通道维，N 个物体各占一张 HxW mask，返回 1
-     * - [N, H, W] → 3D：无 batch 和通道维，返回 1
-     */
-    private fun resolveMaskChannelCount(shape: LongArray): Int {
-        return when (shape.size) {
-            5 -> shape[2].toInt()  // [1, N, C, H, W]
-            4 -> 1                 // [1, N, H, W]（无通道维，与 resolveMaskDims 语义一致）
-            else -> 1              // [N, H, W]
-        }
     }
 
     private companion object {

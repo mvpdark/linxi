@@ -6,7 +6,9 @@ package top.mvpdark.lingxi.core.util
 actual fun currentTimeMillis(): Long = System.currentTimeMillis()
 
 actual fun formatDouble(value: Double, decimals: Int): String {
-    return String.format("%.${decimals}f", value)
+    // 固定 Locale.US：德/法等 Locale 下 %f 输出逗号小数点（"1,50"），
+    // 会导致金额等数值显示错乱
+    return String.format(java.util.Locale.US, "%.${decimals}f", value)
 }
 
 actual fun getAppVersion(): String {

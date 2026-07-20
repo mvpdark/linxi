@@ -1,8 +1,10 @@
 package top.mvpdark.lingxi.ui.imageedit
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -23,7 +25,9 @@ actual fun rememberImagePickerLauncher(onResult: (ByteArray?) -> Unit): () -> Un
             isMultiSelectionEnabled = false
         }
     }
-    // remember(Unit) 避免 onResult 变化导致 remember 失效
+    // rememberUpdatedState 持有最新 onResult：remember(Unit) 缓存的启动 lambda
+    // 不会因重组捕获到过期的回调引用
+    val currentOnResult by rememberUpdatedState(onResult)
     return remember(Unit) {
         {
             // TODO: 传入 Compose 窗口的 AWT Window 作为 parent，避免对话框可能出现在屏幕角落
@@ -43,10 +47,10 @@ actual fun rememberImagePickerLauncher(onResult: (ByteArray?) -> Unit): () -> Un
                             )
                         }.getOrNull()
                     }
-                    onResult(bytes)
+                    currentOnResult(bytes)
                 }
             } else {
-                onResult(null)
+                currentOnResult(null)
             }
         }
     }

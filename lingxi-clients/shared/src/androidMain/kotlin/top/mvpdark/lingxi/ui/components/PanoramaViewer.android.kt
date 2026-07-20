@@ -140,7 +140,16 @@ actual fun PanoramaViewer(
                         conn.connectTimeout = 15000
                         conn.readTimeout = 30000
                         conn.useCaches = false
-                        conn.inputStream.use { it.readBytes() }
+                        try {
+                            // 校验状态码：避免 3xx 错误页/200 错误页字节被当作全景图写入（W12 同类）
+                            val code = conn.responseCode
+                            if (code != java.net.HttpURLConnection.HTTP_OK) {
+                                throw java.io.IOException("HTTP $code")
+                            }
+                            conn.inputStream.use { it.readBytes() }
+                        } finally {
+                            conn.disconnect()
+                        }
                     }
                     else -> {
                         try {
@@ -309,12 +318,16 @@ actual fun PanoramaViewer(
     }
 
     LaunchedEffect(htmlPath) {
-        htmlPath?.let { dirPath ->
+        val dirPath = htmlPath
+        if (dirPath != null) {
             webView.post {
                 // WebViewAssetLoader 把缓存目录映射为 https://appassets.androidplatform.net/panorama/...
                 // 入口文件是缓存目录里的 index.html（由 panorama_viewer.html 模板写入）
                 webView.loadUrl("https://appassets.androidplatform.net/panorama/${File(dirPath).name}/index.html")
             }
+        } else {
+            // imageUrl 清空时重置 WebView，避免残留显示上一张全景图
+            webView.post { webView.loadUrl("about:blank") }
         }
     }
 

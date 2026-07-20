@@ -344,16 +344,6 @@ class ImageEditViewModel(
         _uiState.value = ImageEditUiState()
     }
 
-    /**
-     * ViewModel 销毁时回调。
-     *
-     * SamService 是 Koin single，生命周期长于 ViewModel，不在此关闭。
-     * viewModelScope 会自动取消所有协程，无需手动处理。
-     */
-    override fun onCleared() {
-        super.onCleared()
-    }
-
     /** 清除错误提示。 */
     fun clearError() {
         _uiState.update { it.copy(error = null) }

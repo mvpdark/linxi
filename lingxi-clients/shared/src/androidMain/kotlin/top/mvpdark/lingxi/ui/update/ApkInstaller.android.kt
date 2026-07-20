@@ -8,8 +8,10 @@ import io.ktor.client.call.body
 import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.request.get
 import io.ktor.client.statement.HttpResponse
+import io.ktor.http.isSuccess
 import io.ktor.utils.io.ByteReadChannel
 import io.ktor.utils.io.readAvailable
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import top.mvpdark.lingxi.core.network.createEngine
@@ -17,6 +19,7 @@ import top.mvpdark.lingxi.core.util.PlatformLogger
 import top.mvpdark.lingxi.di.AndroidAppContextHolder
 import java.io.File
 import java.io.FileOutputStream
+import java.io.IOException
 
 /**
  * Android 平台 APK 安装器。
@@ -48,6 +51,11 @@ actual class ApkInstaller actual constructor() {
                 }
                 client.use {
                     val response: HttpResponse = it.get(downloadUrl)
+                    // Ktor 默认不校验状态码：404/500 时错误页字节会被写成 apk，
+                    // 导致安装器报"解析包错误"，必须先校验（W12 遗留）
+                    if (!response.status.isSuccess()) {
+                        throw IOException("APK 下载失败：HTTP ${response.status.value}")
+                    }
                     val channel: ByteReadChannel = response.body()
                     val totalBytes = response.headers["Content-Length"]?.toLongOrNull() ?: -1L
                     var downloadedBytes = 0L
@@ -86,6 +94,9 @@ actual class ApkInstaller actual constructor() {
             }
 
             onComplete(true)
+        } catch (e: CancellationException) {
+            // 协程取消不属于下载失败，向上传播；若吞掉会把取消误报为"更新失败"
+            throw e
         } catch (e: Exception) {
             PlatformLogger.e(
                 "ApkInstaller",

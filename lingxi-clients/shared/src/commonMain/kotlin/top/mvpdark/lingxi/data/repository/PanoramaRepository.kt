@@ -10,6 +10,7 @@ import kotlinx.serialization.Serializable
 import top.mvpdark.lingxi.core.network.ApiClient
 import top.mvpdark.lingxi.core.util.PlatformLogger
 import top.mvpdark.lingxi.core.util.runCatchingCancellable
+import top.mvpdark.lingxi.core.util.sanitizeMultipartFileName
 import top.mvpdark.lingxi.core.util.toUserMessage
 
 /**
@@ -49,9 +50,11 @@ class PanoramaRepository(
             apiClient.httpClient.submitFormWithBinaryData(
                 url = "/api/panorama/ai-generate",
                 formData = formData {
+                    // 清洗文件名，防止引号/换行破坏 multipart header 结构
+                    val safeFileName = sanitizeMultipartFileName(fileName)
                     append("floor_plan", floorPlanBytes, Headers.build {
-                        append(HttpHeaders.ContentDisposition, "form-data; name=\"floor_plan\"; filename=\"$fileName\"")
-                        append(HttpHeaders.ContentType, guessContentType(fileName))
+                        append(HttpHeaders.ContentDisposition, "form-data; name=\"floor_plan\"; filename=\"$safeFileName\"")
+                        append(HttpHeaders.ContentType, guessContentType(safeFileName))
                     })
                     append("style_desc", styleDesc)
                 },

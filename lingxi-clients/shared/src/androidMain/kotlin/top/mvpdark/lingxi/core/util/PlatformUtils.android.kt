@@ -9,7 +9,9 @@ import top.mvpdark.lingxi.di.AndroidAppContextHolder
 actual fun currentTimeMillis(): Long = System.currentTimeMillis()
 
 actual fun formatDouble(value: Double, decimals: Int): String {
-    return String.format("%.${decimals}f", value)
+    // 固定 US Locale：德/法等 Locale 下 "%.2f" 会输出逗号小数点（如 1,50），
+    // 导致金额等展示错误（R11）
+    return String.format(java.util.Locale.US, "%.${decimals}f", value)
 }
 
 actual fun getAppVersion(): String {
