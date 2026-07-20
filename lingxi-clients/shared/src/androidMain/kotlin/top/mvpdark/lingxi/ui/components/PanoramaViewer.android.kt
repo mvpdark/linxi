@@ -79,7 +79,8 @@ class PanoramaJsBridge(
  * 6. 全屏按钮隐藏（showFullscreenCtrl: false）：Android WebView 未实现 onShowCustomView，
  *    用户点击全屏按钮无反应甚至卡死。
  * 7. JS 桥 + 看门狗：HTML 在 load/error/loadError 时回调 Kotlin，Kotlin 据此更新 UI 状态，
- *    同时以 8 秒看门狗兜底，超时则显示「全景加载超时」。
+ *    同时以 12 秒看门狗兜底（大全景图纹理上传耗时较长，8 秒阈值易误报），
+ *    超时则显示「全景加载超时」。
  * 8. WebGL 探测：HTML 入口处主动探测 canvas.getContext('webgl')，不支持时立即显示中文提示。
  */
 @SuppressLint("SetJavaScriptEnabled")
@@ -179,11 +180,12 @@ actual fun PanoramaViewer(
         }
     }
 
-    // 看门狗：8 秒内未收到 onPanoramaLoaded 则提示超时
+    // 看门狗：12 秒内未收到 onPanoramaLoaded 则提示超时
+    // （大全景图纹理上传可能超过 8 秒，8 秒阈值容易误报超时）
     LaunchedEffect(htmlPath) {
         if (htmlPath != null) {
             renderState = 1 // 加载中
-            delay(8000)
+            delay(12000)
             if (isActive && renderState == 1) {
                 renderState = -1
                 loadError = "全景加载超时，请检查设备是否支持 WebGL"
@@ -244,6 +246,9 @@ actual fun PanoramaViewer(
             settings.allowUniversalAccessFromFileURLs = false
             settings.mediaPlaybackRequiresUserGesture = false
             setLayerType(android.view.View.LAYER_TYPE_HARDWARE, null)
+            // 初始背景设为黑色：WebView 创建时 URL 为空，默认白底会在 HTML 加载前闪白屏；
+            // 容器 Box 背景同为黑色，加载指示器改为半透明后 WebView 露出时视觉一致
+            setBackgroundColor(android.graphics.Color.BLACK)
 
             // 启用 WebView 调试（chrome://inspect）：按应用可调试标志动态开启，
             // 仅 debuggable 构建生效，release 包关闭
@@ -348,12 +353,13 @@ actual fun PanoramaViewer(
             modifier = Modifier.fillMaxSize(),
         )
 
-        // 错误提示覆盖层
+        // 错误提示覆盖层：半透明红色叠加而非纯黑全覆盖，
+        // HTML 内 #hint 的错误详情（如 WebGL 不可用）仍可被用户看到
         loadError?.let { errorMsg ->
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(Color.Black),
+                    .background(Color.Red.copy(alpha = 0.35f)),
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
@@ -366,12 +372,14 @@ actual fun PanoramaViewer(
             }
         }
 
-        // 加载中提示（htmlPath 已准备好但 JS 还没回调成功）
+        // 加载中提示（htmlPath 已准备好但 JS 还没回调成功）：
+        // 半透明叠加层而非纯黑全覆盖，WebView 保持可见，
+        // 用户能看到全景从黑屏逐渐渲染出来的过程
         if (htmlPath != null && renderState != 2 && loadError == null && imageUrl.isNotEmpty()) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(Color.Black),
+                    .background(Color.Black.copy(alpha = 0.35f)),
                 contentAlignment = Alignment.Center,
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {

@@ -60,9 +60,13 @@ import kotlin.concurrent.thread
  * Desktop 全景查看器（内嵌 JCEF / Chromium 方案）。
  *
  * 工作流程：
- * 1. 将 pannellum.js、pannellum.css、panorama_data.js（base64 图片）写入临时目录，
- *    生成 index.html 引用上述文件（与旧方案共用 preparePanoramaFiles）
- * 2. 全局一次性初始化 JCEF（CefAppBuilder 从 classpath 提取原生库 → CefApp）
+ * 1. 将共享资源 panorama_viewer.html（原样 → index.html）、pannellum.js、
+ *    pannellum.css、全景图原文件（panorama.{png|jpg|webp}）写入临时目录，
+ *    panorama_data.js 仅写相对路径配置 window.__panoramaConfig.url ——
+ *    与 Android 端策略一致；不再 base64 内联图片 + blob URL（避免大图
+ *    atob 解码瞬时放大 4~5 倍内存）
+ * 2. 全局一次性初始化 JCEF（CefAppBuilder 从 classpath 提取原生库 → CefApp），
+ *    并附加 allow-file-access-from-files 等命令行开关以放开 file:// 图片加载
  * 3. 通过 SwingPanel 内嵌 CefBrowser 的 AWT UI 组件（窗口渲染模式，GPU 加速）
  * 4. CefBrowser 加载 file:/// URL，监听 CefLoadHandler 状态驱动 Compose 加载/错误 UI
  *
@@ -85,9 +89,9 @@ import kotlin.concurrent.thread
  * - macOS 上自动执行 unquarantine 以避免 Gatekeeper 拦截
  * - CefAppBuilder 内部注册了 JVM shutdown hook 自动调用 CefApp.dispose()
  *
- * 注意：pannellum.js 包含 $a 等 JS 变量名，不能内联到 Kotlin """...""" 模板字符串
- * （Kotlin 会将 $a 解析为模板表达式导致编译错误），必须作为独立文件通过
- * <script src="pannellum.js"> 引用。
+ * 注意：panorama_viewer.html 与 pannellum.js 均含 JS 代码（$a 等变量名），
+ * 通过 Res.readBytes() 原样写盘，不经过 Kotlin """...""" 模板字符串
+ * （避免 $a 被 Kotlin 解析为模板表达式），无转义问题。
  *
  * @param imageUrl 全景图 URL（data URL、http(s) URL、file:// 或本地路径）
  * @param modifier 修饰符
@@ -498,6 +502,18 @@ private fun ensureJcefInitialized() {
         builder.setProgressHandler(ConsoleProgressHandler())
         // 窗口渲染模式（非 OSR）：启用 GPU 加速的 WebGL
         builder.getCefSettings().windowless_rendering_enabled = false
+        // file:// 页面加载同目录图片：Pannellum 以 crossOrigin='anonymous' 的
+        // Image 拉取全景图并上传 WebGL 纹理，Chromium 默认把 file:// 视为
+        // 不透明源（CORS 拦截 → 纹理被污染 → 黑屏/loadError）。
+        // jcefgithub 官方注入命令行开关的方式是 addJcefArgs（args 经
+        // CefApp.getInstance(args, settings) 传入，由 MavenCefAppHandlerAdapter
+        // 委托 CefAppHandlerAdapter.onBeforeCommandLineProcessing 解析为
+        // Chromium switches；MavenCefAppHandlerAdapter.onBeforeCommandLineProcessing
+        // 是 final 的，不能 override 注入）。
+        builder.addJcefArgs(
+            "--allow-file-access-from-files",
+            "--allow-universal-access-from-files",
+        )
         // macOS 兼容性：必须通过 setAppHandler 设置（不能直接调 CefApp.addAppHandler）
         builder.setAppHandler(object : MavenCefAppHandlerAdapter() {})
         // build() 线程安全且幂等：安装原生库 → 初始化 CefApp → 注册 shutdown hook
@@ -507,100 +523,63 @@ private fun ensureJcefInitialized() {
 }
 
 /**
- * 准备全景图文件目录（pannellum.js + pannellum.css + panorama_data.js + index.html）。
+ * 准备全景图文件目录，与 Android 端策略一致（共享模板 + 图片原文件 + 相对路径配置）：
  *
- * 关键：pannellum.js 作为独立文件写入，不内联到 Kotlin 模板字符串，
- * 避免 $a 等 JS 变量名被 Kotlin 解析为模板表达式。
+ *   panorama_<ts>/
+ *     ├── index.html        共享模板 panorama_viewer.html 原样写入
+ *     ├── pannellum.js      共享资源
+ *     ├── pannellum.css     共享资源
+ *     ├── panorama_data.js  仅含 window.__panoramaConfig 相对路径配置
+ *     └── panorama.{png|jpg|webp}  全景图原文件（保留原始格式扩展名）
+ *
+ * 关键设计：
+ * - 不再 base64 内联图片、不再 JS 层 atob → Uint8Array → blob URL 中间层
+ *   （旧 JavaFX WebView 方案规避 file:// XHR 限制的产物，大全景图会瞬时放大
+ *   4~5 倍内存导致 OOM/白屏；JCEF 基于 Chromium，放开 file:// 访问后即可
+ *   直接加载同目录图片）。
+ * - panorama_viewer.html / pannellum.js 均含 JS 代码（$a 等变量名），
+ *   通过 Res.readBytes() 原样写盘，不经过 Kotlin 模板字符串，无 $ 转义问题。
+ * - 模板内置 bridgeLog / bridgeLoaded / bridgeError：Desktop 无 AndroidBridge，
+ *   自动降级为 console.log + 页面内 hint 提示；WebGL 探测、错误处理由模板负责。
  */
 private suspend fun preparePanoramaFiles(imageUrl: String): File {
     // 1. 创建临时目录（统一父目录 {tmpdir}/lingxi-panorama/panorama_<ts>，
     //    JVM shutdown hook 在 PanoramaTempDir 内全局仅注册一次，退出时删除整个父目录）
     val dir = PanoramaTempDir.allocateDir()
 
-    // 2. 写入 pannellum.js（独立文件，不内联）
-    val jsBytes = Res.readBytes("files/panorama/pannellum.js")
-    File(dir, "pannellum.js").writeBytes(jsBytes)
+    // 2. 写入 pannellum.js / pannellum.css（独立文件，不内联）
+    File(dir, "pannellum.js").writeBytes(Res.readBytes("files/panorama/pannellum.js"))
+    File(dir, "pannellum.css").writeBytes(Res.readBytes("files/panorama/pannellum.css"))
 
-    // 3. 写入 pannellum.css
-    val cssBytes = Res.readBytes("files/panorama/pannellum.css")
-    File(dir, "pannellum.css").writeBytes(cssBytes)
+    // 3. 写入 index.html（共享模板 panorama_viewer.html 原样写盘，纯模板不含图片数据）
+    File(dir, "index.html").writeBytes(Res.readBytes("files/panorama/panorama_viewer.html"))
 
-    // 4. 读取全景图字节并转 base64，写入 panorama_data.js
+    // 4. 全景图原样写入本地文件，扩展名如实反映内容格式（避免 MIME 与内容不匹配
+    //    导致解码失败；旧代码无论格式一律声明 image/jpeg）
     val imageBytes = readImageBytes(imageUrl)
-    val base64Str = Base64.getEncoder().encodeToString(imageBytes)
-    val dataJs = "window.__panoramaBase64 = \"data:image/jpeg;base64," + base64Str + "\";"
-    File(dir, "panorama_data.js").writeText(dataJs)
-
-    // 5. 生成 index.html（通过 <script src> 引用外部文件，不内联 JS）
-    val html = buildString {
-        appendLine("<!DOCTYPE html>")
-        appendLine("<html lang=\"zh-CN\">")
-        appendLine("<head>")
-        appendLine("<meta charset=\"UTF-8\">")
-        appendLine("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">")
-        appendLine("<title>360 Panorama - Lingxi</title>")
-        appendLine("<link rel=\"stylesheet\" href=\"pannellum.css\">")
-        appendLine("<style>")
-        appendLine("* { margin: 0; padding: 0; box-sizing: border-box; }")
-        appendLine("html, body { width: 100%; height: 100%; overflow: hidden; background: #000; }")
-        appendLine("#viewer { width: 100vw; height: 100vh; }")
-        appendLine(".hint {")
-        appendLine("  position: absolute; bottom: 16px; left: 50%; transform: translateX(-50%);")
-        appendLine("  color: rgba(255,255,255,0.8); font-size: 14px; font-family: -apple-system, sans-serif;")
-        appendLine("  background: rgba(0,0,0,0.4); padding: 6px 14px; border-radius: 16px;")
-        appendLine("  pointer-events: none; z-index: 10;")
-        appendLine("}")
-        appendLine("</style>")
-        appendLine("</head>")
-        appendLine("<body>")
-        appendLine("<div id=\"viewer\"></div>")
-        appendLine("<div class=\"hint\" id=\"hint\">拖动画面查看 360 视角</div>")
-        appendLine("<script src=\"panorama_data.js\"></script>")
-        appendLine("<script src=\"pannellum.js\"></script>")
-        appendLine("<script>")
-        appendLine("var viewer = null;")
-        appendLine("function base64ToBlobUrl(base64) {")
-        appendLine("  var pure = base64;")
-        appendLine("  if (pure.indexOf(',') !== -1) pure = pure.split(',')[1];")
-        appendLine("  var bytes = atob(pure);")
-        appendLine("  var arr = new Uint8Array(bytes.length);")
-        appendLine("  for (var i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i);")
-        appendLine("  return URL.createObjectURL(new Blob([arr], { type: 'image/jpeg' }));")
-        appendLine("}")
-        appendLine("(function() {")
-        appendLine("  var blobUrl = base64ToBlobUrl(window.__panoramaBase64);")
-        appendLine("  viewer = pannellum.viewer('viewer', {")
-        appendLine("    type: 'equirectangular',")
-        appendLine("    panorama: blobUrl,")
-        appendLine("    autoLoad: true,")
-        appendLine("    showZoomCtrl: true,")
-        appendLine("    showFullscreenCtrl: true,")
-        appendLine("    compass: false,")
-        appendLine("    minHfov: 50,")
-        appendLine("    maxHfov: 120,")
-        appendLine("    friction: 0.15")
-        appendLine("  });")
-        appendLine("  viewer.on('loadError', function() {")
-        appendLine("    document.getElementById('hint').textContent = '全景图加载失败';")
-        appendLine("  });")
-        appendLine("  viewer.on('error', function() {")
-        appendLine("    document.getElementById('hint').textContent = '全景图加载失败';")
-        appendLine("  });")
-        appendLine("  document.getElementById('viewer').addEventListener('mousedown', function() {")
-        appendLine("    var h = document.getElementById('hint');")
-        appendLine("    if (h) h.style.display = 'none';")
-        appendLine("  }, { once: true });")
-        appendLine("})();")
-        appendLine("</script>")
-        appendLine("</body>")
-        appendLine("</html>")
+    val ext = when {
+        imageUrl.startsWith("data:image/png") -> "png"
+        imageUrl.startsWith("data:image/webp") -> "webp"
+        imageUrl.startsWith("data:") -> "jpg"
+        else -> {
+            // 去掉 query/fragment 再取扩展名；非法扩展名回退 jpg
+            val pathOnly = imageUrl.substringBefore('?').substringBefore('#')
+            val candidate = pathOnly.substringAfterLast('.', "").lowercase()
+            if (candidate in listOf("jpg", "jpeg", "png", "webp")) candidate else "jpg"
+        }
     }
+    val imageFileName = "panorama.$ext"
+    File(dir, imageFileName).writeBytes(imageBytes)
 
-    val htmlFile = File(dir, "index.html")
-    htmlFile.writeText(html)
+    // 5. 写入 panorama_data.js（仅写相对路径配置，文件名与上面写入的一致；
+    //    模板入口读取 window.__panoramaConfig.url 后交给 Pannellum 同源加载）
+    File(dir, "panorama_data.js").writeText(
+        "window.__panoramaConfig = {url: \"$imageFileName\"};"
+    )
+
     // 临时文件清理由 PanoramaTempDir 内全局唯一的 shutdown hook 兜底（退出时
     // 递归删除整个 lingxi-panorama 父目录），无需再对单个文件调用 deleteOnExit()。
-    return htmlFile
+    return File(dir, "index.html")
 }
 
 /**

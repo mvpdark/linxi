@@ -25,6 +25,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.AddAPhoto
 import androidx.compose.material.icons.filled.AutoAwesome
@@ -45,6 +46,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -96,11 +98,13 @@ private val AnnotationBlue = Color(0xFF2563EB)
  * [ImageEditViewModel.onPickImage] 传入字节流。
  *
  * @param viewModel 图像编辑 ViewModel（Koin 注入）。
+ * @param onBack 返回上一页回调（Compose Navigation popBackStack）。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ImageEditScreen(
     viewModel: ImageEditViewModel = koinViewModel(),
+    onBack: () -> Unit = {},
 ) {
     val state by viewModel.uiState.collectAsState()
     val launchPicker = rememberImagePickerLauncher { bytes ->
@@ -124,6 +128,17 @@ fun ImageEditScreen(
                         }
                     }
                 },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "返回",
+                        )
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = Color.Transparent,
+                ),
             )
         },
     ) { paddingValues ->

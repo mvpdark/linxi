@@ -94,7 +94,9 @@ fun NavGraph() {
 
         // ImageEditViewModel 通过 koinViewModel() 注入，生命周期绑定到 IMAGE_EDIT back stack entry
         composable(Routes.IMAGE_EDIT) {
-            ImageEditScreen()
+            ImageEditScreen(
+                onBack = { navController.popBackStack() },
+            )
         }
 
         composable(Routes.PANORAMA) {
