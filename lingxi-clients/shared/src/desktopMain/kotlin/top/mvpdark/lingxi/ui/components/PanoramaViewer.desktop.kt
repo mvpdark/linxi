@@ -37,13 +37,18 @@ import io.github.trethore.jcefgithub.CefAppBuilder
 import io.github.trethore.jcefgithub.MavenCefAppHandlerAdapter
 import io.github.trethore.jcefgithub.impl.progress.ConsoleProgressHandler
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
 import org.cef.CefApp
 import org.cef.CefClient
 import org.cef.browser.CefBrowser
 import org.cef.browser.CefFrame
+import org.cef.browser.CefMessageRouter
+import org.cef.callback.CefQueryCallback
 import org.cef.handler.CefLoadHandler
 import org.cef.handler.CefLoadHandlerAdapter
+import org.cef.handler.CefMessageRouterHandlerAdapter
 import lingxi_clients.shared.generated.resources.Res
 import top.mvpdark.lingxi.core.util.PlatformLogger
 import java.awt.BorderLayout
@@ -148,15 +153,141 @@ actual fun PanoramaViewer(
         }
     }
 
-    // 2. CefBrowser 与 HTML 文件都就绪后，加载 file:/// URL
-    //    CefBrowser.loadURL 内部派发到 CEF 消息循环，可从任意线程调用
-    LaunchedEffect(cefBrowser, htmlFile, useSystemBrowser) {
-        val browser = cefBrowser ?: return@LaunchedEffect
+    // 2. JCEF 就绪 + HTML 文件就绪后，创建 CefBrowser 并直接加载 file:/// URL
+    //    浏览器在 LaunchedEffect（EDT）中创建，不在 SwingPanel factory 中创建，
+    //    这样可以在 status != Ready 时不渲染 SwingPanel（避免重量级 AWT Canvas
+    //    的 z-order 遮挡 Compose 覆盖层），等 Pannellum load 事件（纹理上传完成）
+    //    通过 JS 桥回调后再渲染 SwingPanel。
+    LaunchedEffect(jcefReady, htmlFile, useSystemBrowser) {
+        if (!jcefReady || useSystemBrowser) return@LaunchedEffect
         val file = htmlFile ?: return@LaunchedEffect
-        if (useSystemBrowser) return@LaunchedEffect
+
+        // 关闭旧浏览器（切换全景图时 htmlFile 变化触发）
+        cefBrowser?.let { runCatching { it.close(false) } }
+        cefClient?.let { runCatching { it.dispose() } }
+        cefBrowser = null
+        cefClient = null
+
         status = PanoramaStatus.Loading
-        // toURI().toURL() 在 Windows 上生成正确的 file:///C:/... 形式
-        browser.loadURL(file.toURI().toURL().toExternalForm())
+        error = null
+        try {
+            val app = CefApp.getInstance()
+            val client = app.createClient()
+
+            // JS 桥：CefMessageRouter 接收页面 cefQuery 调用。
+            // 共享模板通过 window.AndroidBridge.onPanoramaLoaded() 回传加载完成，
+            // 垫片（ANDROID_BRIDGE_SHIM_JS）把调用转为 cefQuery({request:'loaded'})，
+            // 此处接收并设置 Ready。CefMessageRouter 在 V8 context 创建时自动注入
+            // window.cefQuery，早于页面脚本执行。
+            val router = CefMessageRouter.create()
+            router.addHandler(object : CefMessageRouterHandlerAdapter() {
+                override fun onQuery(
+                    browser: CefBrowser?,
+                    frame: CefFrame?,
+                    queryId: Long,
+                    request: String?,
+                    persistent: Boolean,
+                    callback: CefQueryCallback?,
+                ): Boolean {
+                    when (request) {
+                        "loaded" -> {
+                            // Pannellum load 事件 = 纹理上传完成，真正可交互
+                            status = PanoramaStatus.Ready
+                            error = null
+                        }
+                        null -> return false
+                        else -> {
+                            when {
+                                request.startsWith("error:") -> {
+                                    status = PanoramaStatus.Error
+                                    error = request.substringAfter("error:")
+                                }
+                                request.startsWith("log:") -> {
+                                    PlatformLogger.d("PanoramaJS", request.substringAfter("log:"))
+                                }
+                            }
+                        }
+                    }
+                    callback?.success("")
+                    return true
+                }
+            }, false)
+            client.addMessageRouter(router)
+
+            // 监听页面加载状态：注入 AndroidBridge 垫片 + 错误处理。
+            // 回调在 CEF 线程触发，写 Compose snapshot state 线程安全。
+            client.addLoadHandler(object : CefLoadHandlerAdapter() {
+                override fun onLoadingStateChange(
+                    browser: CefBrowser?,
+                    isLoading: Boolean,
+                    canGoBack: Boolean,
+                    canGoForward: Boolean,
+                ) {
+                    // 页面加载完成时注入垫片。Pannellum 的 load 事件在页面 load 之后
+                    // 异步触发（纹理上传耗时），垫片注入不会错过 load 事件。
+                    // 不在此处设置 Ready（等 JS 桥 loaded 回调确保纹理上传完成）。
+                    if (!isLoading && browser != null) {
+                        browser.executeJavaScript(
+                            ANDROID_BRIDGE_SHIM_JS,
+                            browser.url ?: "about:blank",
+                            0,
+                        )
+                    }
+                }
+
+                override fun onLoadEnd(
+                    browser: CefBrowser?,
+                    frame: CefFrame?,
+                    httpStatusCode: Int,
+                ) {
+                    // 主帧加载完成时也注入垫片（双保险）
+                    if (frame?.isMain == true && browser != null) {
+                        browser.executeJavaScript(
+                            ANDROID_BRIDGE_SHIM_JS,
+                            frame.url ?: "about:blank",
+                            0,
+                        )
+                    }
+                }
+
+                override fun onLoadError(
+                    browser: CefBrowser?,
+                    frame: CefFrame?,
+                    errorCode: CefLoadHandler.ErrorCode?,
+                    errorText: String?,
+                    failedUrl: String?,
+                ) {
+                    // 仅处理主帧错误，忽略子资源错误（如图片加载失败由 Pannellum loadError 处理）
+                    if (frame?.isMain == true) {
+                        status = PanoramaStatus.Error
+                        error = "全景图页面加载失败: ${errorText ?: errorCode?.toString() ?: "未知错误"}"
+                    }
+                }
+            })
+
+            // 创建浏览器并直接加载 URL（不再用空 URL + 后续 loadURL，避免白屏）
+            // windowed 渲染（isOffscreenRendered=false）启用 GPU 加速的 WebGL
+            val url = file.toURI().toURL().toExternalForm()
+            val browser = client.createBrowser(url, false, false)
+            cefBrowser = browser
+            cefClient = client
+        } catch (t: Throwable) {
+            PlatformLogger.e("PanoramaViewer", "Create JCEF browser failed", t)
+            error = "初始化内嵌浏览器失败: ${t.message}"
+            status = PanoramaStatus.Error
+        }
+    }
+
+    // 2b. 看门狗：25 秒内未收到 Pannellum load 回调则提示超时
+    //     （大全景图纹理上传耗时较长，与 Android 端 12 秒阈值相比 Desktop 给更宽裕）
+    LaunchedEffect(status) {
+        if (status == PanoramaStatus.Loading) {
+            delay(PANORAMA_LOAD_TIMEOUT_MS)
+            if (isActive && status == PanoramaStatus.Loading) {
+                status = PanoramaStatus.Error
+                error = "全景加载超时，请检查设备是否支持 WebGL"
+            }
+        }
     }
 
     // 3. 离开组合时关闭浏览器、释放 CefClient（CefApp 全局单例由 shutdown hook 释放）
@@ -212,71 +343,27 @@ actual fun PanoramaViewer(
     }
 
     Box(modifier = modifier.background(Color.Black)) {
-        // JCEF 初始化成功且文件就绪后才内嵌 CefBrowser
-        if (jcefReady && htmlFile != null && error == null) {
-            SwingPanel(
-                factory = {
-                    try {
-                        val app = CefApp.getInstance()
-                        val client = app.createClient()
-
-                        // 监听页面加载状态，驱动 Compose 侧的加载/错误覆盖层。
-                        // 回调在 CEF 线程触发，写 Compose snapshot state 线程安全。
-                        client.addLoadHandler(
-                            object : CefLoadHandlerAdapter() {
-                                override fun onLoadingStateChange(
-                                    browser: CefBrowser?,
-                                    isLoading: Boolean,
-                                    canGoBack: Boolean,
-                                    canGoForward: Boolean,
-                                ) {
-                                    if (!isLoading) {
-                                        // 页面加载完成。JCEF 基于 Chromium，原生支持 WebGL，
-                                        // 无需像 JavaFX WebView 那样主动探测 WebGL 可用性。
-                                        status = PanoramaStatus.Ready
-                                    }
-                                }
-
-                                override fun onLoadError(
-                                    browser: CefBrowser?,
-                                    frame: CefFrame?,
-                                    errorCode: CefLoadHandler.ErrorCode?,
-                                    errorText: String?,
-                                    failedUrl: String?,
-                                ) {
-                                    // 仅处理主帧错误，忽略子资源错误（如图片加载失败）
-                                    if (frame?.isMain == true) {
-                                        status = PanoramaStatus.Error
-                                        error = "全景图页面加载失败: ${errorText ?: errorCode?.toString() ?: "未知错误"}"
-                                    }
-                                }
-                            },
-                        )
-
-                        // 创建浏览器：windowed 渲染（isOffscreenRendered=false）
-                        // 以启用 GPU 加速的 WebGL（Pannellum 全景渲染必需）
-                        val browser = client.createBrowser("", false, false)
-                        cefBrowser = browser
-                        cefClient = client
-
+        // 仅在 Ready 且无错误时渲染 SwingPanel，避免重量级 AWT Canvas（JCEF 窗口渲染
+        // 模式下的 windowed Canvas）始终渲染在所有 Compose 内容之上、遮挡加载/错误覆盖层。
+        // 浏览器已在 LaunchedEffect 中创建并加载 URL，此处 factory 仅包裹其 UI 组件。
+        if (jcefReady && htmlFile != null && status == PanoramaStatus.Ready && error == null) {
+            cefBrowser?.let { browser ->
+                SwingPanel(
+                    factory = {
+                        // 浏览器已在 LaunchedEffect（EDT）中创建，此处仅包裹其 UI 组件。
                         // CefBrowser.getUIComponent() 返回 AWT Component（窗口渲染模式下为
                         // 重量级 Canvas），用 JPanel 包裹以设置黑色背景
                         val panel = JPanel(BorderLayout())
                         panel.background = AwtColor.BLACK
                         panel.add(browser.getUIComponent(), BorderLayout.CENTER)
                         panel
-                    } catch (t: Throwable) {
-                        PlatformLogger.e("PanoramaViewer", "Create JCEF browser failed", t)
-                        error = "初始化内嵌浏览器失败: ${t.message}"
-                        status = PanoramaStatus.Error
-                        JPanel().apply { background = AwtColor.BLACK }
-                    }
-                },
-                modifier = Modifier.fillMaxSize(),
-            )
+                    },
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
         }
 
-        // 加载 / 错误状态覆盖层
+        // 加载 / 错误状态覆盖层（纯 Compose，SwingPanel 未渲染时不会被遮挡）
         when {
             error != null -> {
                 Column(
@@ -367,15 +454,47 @@ private enum class PanoramaStatus {
     /** 正在写临时文件 / 初始化 JCEF */
     Preparing,
 
-    /** CefBrowser 正在加载页面 */
+    /** CefBrowser 正在加载页面，等待 Pannellum load 回调 */
     Loading,
 
-    /** 页面加载完成，可交互 */
+    /** Pannellum load 事件已触发（纹理上传完成），可交互 */
     Ready,
 
     /** 失败 */
     Error,
 }
+
+/** 全景加载看门狗超时（毫秒）。大全景图纹理上传耗时较长，25 秒兜底。 */
+private const val PANORAMA_LOAD_TIMEOUT_MS = 25000L
+
+/**
+ * 注入到 JCEF 页面的 AndroidBridge 兼容垫片。
+ *
+ * 共享模板 panorama_viewer.html 通过 window.AndroidBridge 回传状态：
+ * - bridgeLog(msg) → AndroidBridge.log(msg)
+ * - bridgeLoaded() → AndroidBridge.onPanoramaLoaded()
+ * - bridgeError(msg) → AndroidBridge.onPanoramaError(msg)
+ *
+ * Android 端用 @JavascriptInterface 注入真实对象；Desktop JCEF 无此机制，
+ * 改用 CefMessageRouter（cefQuery）桥接：垫片把调用转为 window.cefQuery({request:'...'})，
+ * Kotlin 侧 CefMessageRouterHandlerAdapter.onQuery 据此更新状态。
+ *
+ * 注入时机：主帧 onLoadingStateChange(!isLoading) / onLoadEnd 时执行 executeJavaScript。
+ * Pannellum 的 load 事件是异步的（纹理上传完成后才触发），在页面 load 之后才回调，
+ * 因此垫片注入不会错过 load 事件。
+ *
+ * 幂等：垫片开头检查 window.AndroidBridge 是否已存在，已存在则跳过。
+ */
+private val ANDROID_BRIDGE_SHIM_JS = """
+(function(){
+  if(window.AndroidBridge) return;
+  window.AndroidBridge = {
+    log: function(m) { try { window.cefQuery({request:'log:' + m}); } catch(e) { console.log(m); } },
+    onPanoramaLoaded: function() { try { window.cefQuery({request:'loaded'}); } catch(e) { console.log('loaded'); } },
+    onPanoramaError: function(m) { try { window.cefQuery({request:'error:' + m}); } catch(e) { console.error(m); } }
+  };
+})();
+""".trimIndent()
 
 /**
  * 降级 UI：静态预览图 + 「已在系统浏览器中打开」提示（旧方案界面）。
