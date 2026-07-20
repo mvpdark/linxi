@@ -461,7 +461,8 @@ jobs:
         run: |
           VERSION="v1.0.${{ github.run_number }}"
 
-          # 创建带版本号的 tag 和 release（每次构建独立版本，不再覆盖）
+          # 第一步：先创建不带资产的 release（此前一把梭上传 ~1GB 资产，
+          # gh release create 中途网络抖动会导致整个 release 创建失败）
           gh release create "${VERSION}" \
             --title "灵犀 ${VERSION}" \
             --notes "## 灵犀 ${VERSION}
@@ -474,8 +475,27 @@ jobs:
           - **Android**: 下载 \`${VERSION}-lingxi-android.apk\`
           - **Windows 安装版**: 下载 \`${VERSION}-lingxi-windows.msi\`
           - **Windows 便携版**: 下载 \`${VERSION}-lingxi-windows-portable.exe\`
-          - **macOS Apple Silicon**: 下载 \`${VERSION}-lingxi-macos-arm64.dmg\`" \
-            release-assets/*
+          - **macOS Apple Silicon**: 下载 \`${VERSION}-lingxi-macos-arm64.dmg\`"
+
+          # 第二步：逐个上传资产，单文件最多重试 3 次；--clobber 允许重跑覆盖
+          UPLOAD_FAILED=0
+          for file in release-assets/*; do
+            [ -f "$file" ] || continue
+            ok=0
+            for attempt in 1 2 3; do
+              echo "Uploading $(basename "$file") (attempt $attempt)..."
+              if gh release upload "${VERSION}" "$file" --clobber; then
+                ok=1
+                break
+              fi
+              sleep 10
+            done
+            if [ "$ok" != "1" ]; then
+              echo "::error::Failed to upload $(basename "$file") after 3 attempts"
+              UPLOAD_FAILED=1
+            fi
+          done
+          [ "$UPLOAD_FAILED" = "0" ] || exit 1
 
       - name: Cleanup old releases (keep latest 10)
         env:
