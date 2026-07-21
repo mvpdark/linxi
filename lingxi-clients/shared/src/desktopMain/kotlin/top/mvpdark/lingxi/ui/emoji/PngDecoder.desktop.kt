@@ -15,6 +15,7 @@ actual fun decodePngBytes(bytes: ByteArray): ImageBitmap? {
         val image = ImageIO.read(ByteArrayInputStream(bytes))
         image?.toComposeImageBitmap()
     } catch (e: Exception) {
+        top.mvpdark.lingxi.core.util.PlatformLogger.e("PngDecoder", "PNG decode failed, size=${bytes.size}", e)
         null
     }
 }

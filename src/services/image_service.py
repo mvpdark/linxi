@@ -289,4 +289,5 @@ class ImageService:
             return {"success": True, "images": images, "raw": data}
 
         except Exception as ex:
-            return {"success": False, "error": str(ex)}
+            logger.error("保存图片失败: %s", ex, exc_info=True)
+            return {"success": False, "error": "图片保存失败"}

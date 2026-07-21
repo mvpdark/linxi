@@ -11,6 +11,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import top.mvpdark.lingxi.core.util.PlatformLogger
 import top.mvpdark.lingxi.core.util.toUserMessage
+import top.mvpdark.lingxi.core.util.runCatchingCancellable
 import top.mvpdark.lingxi.data.model.Bbox
 import top.mvpdark.lingxi.data.model.DetectedObject
 import top.mvpdark.lingxi.data.repository.ImageEditRepository
@@ -156,7 +157,7 @@ class ImageEditViewModel(
 
                     // 优先使用端侧 SAM 2（CI 构建时已打包 ONNX 模型，无需网络请求）
                     if (!samService.isReady) {
-                        runCatching {
+                        runCatchingCancellable {
                             samService.loadModel { progress, _ ->
                                 _uiState.update { it.copy(samProgress = progress) }
                             }
@@ -165,14 +166,14 @@ class ImageEditViewModel(
                         }
                     }
 
-                    var samResult = runCatching {
+                    var samResult = runCatchingCancellable {
                         samService.segment(bytes, detectedObjects.map { it.id to it.bbox })
                     }.getOrNull()
 
                     // 端侧 SAM 失败 → 回退到后端 SAM 2（后端模型可用，但需要网络请求）
                     if (samResult == null || !samResult.success) {
                         PlatformLogger.w("ImageEditViewModel", "On-device SAM failed, trying backend SAM")
-                        samResult = runCatching {
+                        samResult = runCatchingCancellable {
                             repository.samSegment(bytes, "image.jpg", detectedObjects.map { it.id to it.bbox })
                         }.getOrNull()
                     }

@@ -12,6 +12,7 @@ import top.mvpdark.lingxi.data.model.ChatMessage
 import top.mvpdark.lingxi.data.model.ChatSession
 import top.mvpdark.lingxi.core.util.currentTimeMillis
 import top.mvpdark.lingxi.core.util.toUserMessage
+import top.mvpdark.lingxi.core.util.runCatchingCancellable
 import top.mvpdark.lingxi.data.local.ImageCacheManager
 import top.mvpdark.lingxi.data.local.LocalMessageStore
 import top.mvpdark.lingxi.data.repository.ChatRepository
@@ -92,7 +93,7 @@ class ChatViewModel(
     fun loadSessions() {
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, error = null) }
-            val result: Result<List<ChatSession>> = runCatching { chatRepository.getSessions() }
+            val result: Result<List<ChatSession>> = runCatchingCancellable { chatRepository.getSessions() }
             result
                 .onSuccess { list ->
                     val sorted = list.sortedWith(
@@ -115,7 +116,7 @@ class ChatViewModel(
     fun togglePin(sessionId: String) {
         val session = _uiState.value.sessions.firstOrNull { it.id == sessionId } ?: return
         viewModelScope.launch {
-            val result: Result<Unit> = runCatching {
+            val result: Result<Unit> = runCatchingCancellable {
                 if (session.pinned) {
                     chatRepository.unpinSession(sessionId)
                 } else {
@@ -147,7 +148,7 @@ class ChatViewModel(
     ) {
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, error = null) }
-            val result: Result<ChatSession> = runCatching { chatRepository.createSession(title) }
+            val result: Result<ChatSession> = runCatchingCancellable { chatRepository.createSession(title) }
             result
                 .onSuccess { session ->
                     _uiState.update {
@@ -182,7 +183,7 @@ class ChatViewModel(
                 )
             }
             // 从本地存储加载历史消息（所有消息和图片都保存在客户端）
-            val result: Result<List<ChatMessage>> = runCatching {
+            val result: Result<List<ChatMessage>> = runCatchingCancellable {
                 localMessageStore.getMessages(sessionId)
             }
             result
@@ -246,7 +247,7 @@ class ChatViewModel(
             // 确保有会话（异步创建，避免阻塞主线程）
             var sessionId: String? = _uiState.value.currentSessionId.ifBlank { null }
             if (sessionId.isNullOrBlank()) {
-                val createResult: Result<ChatSession> = runCatching { chatRepository.createSession("新对话") }
+                val createResult: Result<ChatSession> = runCatchingCancellable { chatRepository.createSession("新对话") }
                 val newSession = createResult.getOrNull()
                 if (newSession != null) {
                     _uiState.update {
@@ -271,7 +272,7 @@ class ChatViewModel(
 
             // 用户图片先缓存到本地（如果有网络图片或data URL）
             val userImageLocal = if (pendingImage.isNotEmpty()) {
-                runCatching { imageCacheManager.cacheImages(listOf(pendingImage)) }
+                runCatchingCancellable { imageCacheManager.cacheImages(listOf(pendingImage)) }
                     .getOrDefault(listOf(pendingImage))
                     .firstOrNull() ?: pendingImage
             } else ""
@@ -298,7 +299,7 @@ class ChatViewModel(
                 }
             }
             // 用户消息保存到本地存储
-            runCatching { localMessageStore.saveMessage(currentSessionId, userMessage) }
+            runCatchingCancellable { localMessageStore.saveMessage(currentSessionId, userMessage) }
 
             // 流式接收 AgentEvent（含异常保护，防止崩溃和 isSending 卡死）
             try {
@@ -328,7 +329,7 @@ class ChatViewModel(
             val currentSession = _uiState.value.sessions.find { it.id == currentSessionId }
             if (currentSession != null && (currentSession.title.isBlank() || currentSession.title == "新对话")) {
                 val autoTitle = pendingText.trim().take(20).ifBlank { "新对话" }
-                runCatching { chatRepository.renameSession(currentSessionId, autoTitle) }
+                runCatchingCancellable { chatRepository.renameSession(currentSessionId, autoTitle) }
                 _uiState.update { state ->
                     state.copy(
                         sessions = state.sessions.map { s ->
@@ -445,7 +446,7 @@ class ChatViewModel(
                 if (cleanedText.isNotEmpty() || collectedImages.isNotEmpty()) {
                     // 图片先下载缓存到本地，保存本地路径（不依赖后端图片URL）
                     val localImages = if (collectedImages.isNotEmpty()) {
-                        runCatching { imageCacheManager.cacheImages(collectedImages) }
+                        runCatchingCancellable { imageCacheManager.cacheImages(collectedImages) }
                             .getOrDefault(collectedImages)
                     } else emptyList()
                     val aiMessage = ChatMessage(
@@ -465,7 +466,7 @@ class ChatViewModel(
                         )
                     }
                     // AI消息保存到本地存储（始终执行，不受会话切换影响）
-                    runCatching { localMessageStore.saveMessage(sessionId, aiMessage) }
+                    runCatchingCancellable { localMessageStore.saveMessage(sessionId, aiMessage) }
                 }
                 // W2 修复：仅当当前会话仍是该流所属的 sessionId 时才清理流式状态；
                 // 否则保留新会话的流式状态。
@@ -531,8 +532,8 @@ class ChatViewModel(
     /** 删除会话（同时清理后端和本地存储）。 */
     fun deleteSession(sessionId: String) {
         viewModelScope.launch {
-            runCatching { chatRepository.deleteSession(sessionId) }
-            runCatching { localMessageStore.deleteSessionMessages(sessionId) }
+            runCatchingCancellable { chatRepository.deleteSession(sessionId) }
+            runCatchingCancellable { localMessageStore.deleteSessionMessages(sessionId) }
             _uiState.update { state ->
                 val remaining = state.sessions.filterNot { s -> s.id == sessionId }
                 if (state.currentSessionId == sessionId) {

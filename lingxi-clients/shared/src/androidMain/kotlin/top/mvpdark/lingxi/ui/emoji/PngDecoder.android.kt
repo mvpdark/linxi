@@ -15,6 +15,7 @@ actual fun decodePngBytes(bytes: ByteArray): ImageBitmap? {
         val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
         bitmap?.asImageBitmap()
     } catch (e: Exception) {
+        top.mvpdark.lingxi.core.util.PlatformLogger.e("PngDecoder", "PNG decode failed, size=${bytes.size}", e)
         null
     }
 }

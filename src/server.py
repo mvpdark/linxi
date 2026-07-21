@@ -1176,15 +1176,22 @@ async def sam_segment(
     if not user_id:
         return _unauthorized()
 
+    # 余额熔断（SAM 为视觉模型推理，与 VLM 一致）
+    _bal_ok, _bal_err, _charged = await _check_balance_and_precharge(user_id, config.precharge_vlm)
+    if not _bal_ok:
+        return _bal_err
+
     content = await read_validated_image(file)
     try:
         content = compress_image(content)  # 自动压缩到1024px
     except ValueError as ex:
+        await _refund_on_failure(user_id, _charged)
         raise HTTPException(400, str(ex))
 
     try:
         obj_list = json.loads(objects)
     except json.JSONDecodeError:
+        await _refund_on_failure(user_id, _charged)
         return JSONResponse(
             {"success": False, "error": "objects 参数不是合法 JSON"},
             status_code=422,
@@ -1201,6 +1208,7 @@ async def sam_segment(
 
         if results is None:
             # SAM 不可用，回退到 bbox 模式
+            await _refund_on_failure(user_id, _charged)
             return JSONResponse(
                 {
                     "success": False,
@@ -1214,6 +1222,7 @@ async def sam_segment(
 
     except Exception as ex:
         logger.error("sam-segment 异常: %s", ex)
+        await _refund_on_failure(user_id, _charged)
         return JSONResponse(
             {"success": False, "error": "SAM 分割服务暂时不可用"},
             status_code=502,

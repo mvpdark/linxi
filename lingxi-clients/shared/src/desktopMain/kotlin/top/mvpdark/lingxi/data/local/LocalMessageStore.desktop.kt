@@ -105,27 +105,25 @@ actual class LocalMessageStore actual constructor(context: PlatformContext) {
     }
 
     actual suspend fun saveImage(url: String, bytes: ByteArray): String {
-        return mutex.withLock {
-            withContext(Dispatchers.IO) {
-                val ext = sniffImageExtension(bytes)
-                val fileName = "${md5(url)}.$ext"
-                val file = File(imagesDir, fileName)
-                // 原子写：先写临时文件再重命名，避免并发读/写或进程中断留下半截文件。
-                // tmp 文件名加 nanoTime 后缀：并发写同一 URL 时避免两个 tmp 互相覆盖。
-                // renameTo 在目标已存在时可能失败（Windows），兜底为覆盖拷贝 + 删除临时文件
-                val tmpFile = File(imagesDir, "$fileName.tmp.${System.nanoTime()}")
-                try {
-                    tmpFile.writeBytes(bytes)
-                    if (!tmpFile.renameTo(file)) {
-                        tmpFile.copyTo(file, overwrite = true)
-                    }
-                } finally {
-                    // 异常时（磁盘满等）清理 tmp，与 Android 端保持一致
-                    if (tmpFile.exists()) tmpFile.delete()
+        return withContext(Dispatchers.IO) {
+            val ext = sniffImageExtension(bytes)
+            val fileName = "${md5(url)}.$ext"
+            val file = File(imagesDir, fileName)
+            // 原子写：先写临时文件再重命名，避免并发读/写或进程中断留下半截文件。
+            // tmp 文件名加 nanoTime 后缀：并发写同一 URL 时避免两个 tmp 互相覆盖。
+            // renameTo 在目标已存在时可能失败（Windows），兜底为覆盖拷贝 + 删除临时文件
+            val tmpFile = File(imagesDir, "$fileName.tmp.${System.nanoTime()}")
+            try {
+                tmpFile.writeBytes(bytes)
+                if (!tmpFile.renameTo(file)) {
+                    tmpFile.copyTo(file, overwrite = true)
                 }
-                // 生成合法 file:// URI（处理 Windows 反斜杠，确保 file:/// 前缀）
-                "file:///" + file.absolutePath.replace('\\', '/')
+            } finally {
+                // 异常时（磁盘满等）清理 tmp，与 Android 端保持一致
+                if (tmpFile.exists()) tmpFile.delete()
             }
+            // 生成合法 file:// URI（处理 Windows 反斜杠，确保 file:/// 前缀）
+            "file:///" + file.absolutePath.replace('\\', '/')
         }
     }
 

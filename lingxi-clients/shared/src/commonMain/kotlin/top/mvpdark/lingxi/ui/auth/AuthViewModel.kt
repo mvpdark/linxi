@@ -10,6 +10,7 @@ import kotlinx.coroutines.launch
 import top.mvpdark.lingxi.data.model.MeResponse
 import top.mvpdark.lingxi.data.repository.AuthException
 import top.mvpdark.lingxi.data.repository.AuthRepository
+import top.mvpdark.lingxi.core.util.runCatchingCancellable
 
 /**
  * 登录/注册/用户信息 UI 状态。
@@ -65,9 +66,9 @@ class AuthViewModel(
     /** 检查本地登录态，决定起始页。 */
     fun checkInitialAuth() {
         viewModelScope.launch {
-            val loggedIn = runCatching { authRepository.isLoggedIn() }.getOrDefault(false)
+            val loggedIn = runCatchingCancellable { authRepository.isLoggedIn() }.getOrDefault(false)
             if (loggedIn) {
-                runCatching { authRepository.getMe() }
+                runCatchingCancellable { authRepository.getMe() }
                     .onSuccess { me ->
                         _uiState.update {
                             it.copy(
@@ -96,7 +97,7 @@ class AuthViewModel(
         }
         _uiState.update { it.copy(isLoading = true, error = null) }
         viewModelScope.launch {
-            runCatching { authRepository.login(state.username, state.password) }
+            runCatchingCancellable { authRepository.login(state.username, state.password) }
                 .onSuccess { resp ->
                     _uiState.update {
                         it.copy(
@@ -131,7 +132,7 @@ class AuthViewModel(
         }
         _uiState.update { it.copy(isLoading = true, error = null) }
         viewModelScope.launch {
-            runCatching { authRepository.register(state.username, state.password) }
+            runCatchingCancellable { authRepository.register(state.username, state.password) }
                 .onSuccess {
                     _uiState.update {
                         it.copy(
@@ -154,7 +155,7 @@ class AuthViewModel(
     /** 退出登录。 */
     fun logout() {
         viewModelScope.launch {
-            runCatching { authRepository.logout() }
+            runCatchingCancellable { authRepository.logout() }
             _uiState.update {
                 AuthUiState(username = it.username) // 保留用户名便于重新登录
             }
@@ -164,7 +165,7 @@ class AuthViewModel(
     /** 刷新用户信息（余额等）。 */
     fun refreshUser() {
         viewModelScope.launch {
-            runCatching { authRepository.getMe() }
+            runCatchingCancellable { authRepository.getMe() }
                 .onSuccess { me ->
                     _uiState.update { it.copy(user = me) }
                 }
