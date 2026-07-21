@@ -1332,22 +1332,25 @@ async def image_edit_annotated(
 
         if result.get("success") and result.get("images"):
             img_path = result["images"][0]["path"]
-            img_bytes = Path(img_path).read_bytes()
-            # 与 /api/image-edit 保持一致：返回 base64 data URL，
-            # 客户端 ImageEditResponse 只认 image 字段，不认 url 字段
-            b64 = base64.b64encode(img_bytes).decode("utf-8")
-            dest_name = f"generated_{int(time.time()*1000)}_{uuid.uuid4().hex[:6]}.png"
-            if webdav.enabled:
-                # 结果图同时写入 WebDAV 用户目录（保留可追溯），并清理 image_service 临时文件
-                url = await webdav.put_file(username, dest_name, img_bytes)
+            try:
+                img_bytes = Path(img_path).read_bytes()
+                # 与 /api/image-edit 保持一致：返回 base64 data URL，
+                # 客户端 ImageEditResponse 只认 image 字段，不认 url 字段
+                b64 = base64.b64encode(img_bytes).decode("utf-8")
+                dest_name = f"generated_{int(time.time()*1000)}_{uuid.uuid4().hex[:6]}.png"
+                if webdav.enabled:
+                    # 结果图同时写入 WebDAV 用户目录（保留可追溯）
+                    url = await webdav.put_file(username, dest_name, img_bytes)
+                    return {"success": True, "image": f"data:image/png;base64,{b64}", "url": url}
+                dest = _ASSETS_DIR / dest_name
+                dest.write_bytes(img_bytes)
+                return {"success": True, "image": f"data:image/png;base64,{b64}", "url": f"/uploads/{dest.name}"}
+            finally:
+                # 清理 image_service 临时文件（两种模式均执行）
                 try:
                     os.unlink(img_path)
                 except OSError:
                     pass
-                return {"success": True, "image": f"data:image/png;base64,{b64}", "url": url}
-            dest = _ASSETS_DIR / dest_name
-            dest.write_bytes(img_bytes)
-            return {"success": True, "image": f"data:image/png;base64,{b64}", "url": f"/uploads/{dest.name}"}
         else:
             logger.error("image-edit-annotated 上游失败: %s", result.get("error"))
             await _refund_on_failure(user_id, _charged)
@@ -1368,6 +1371,14 @@ async def image_edit_annotated(
             {"success": False, "error": "图片编辑服务暂时不可用"},
             status_code=502,
         )
+    finally:
+        # 清理上传临时文件和蒙版文件
+        for p in (tmp_path, mask_path):
+            if p:
+                try:
+                    p.unlink()
+                except OSError:
+                    pass
 
 
 # === WebSocket: 聊天流式 ===
@@ -1653,7 +1664,11 @@ async def panorama_stitch(request: Request, files: list[UploadFile] = File(...))
         equi = py360convert.c2e(faces, h=1024, w=2048, cube_format='dict')
         return Image.fromarray(equi)
 
-    equi_img = await run_in_threadpool(_stitch)
+    try:
+        equi_img = await run_in_threadpool(_stitch)
+    except Exception:
+        await _refund_on_failure(user_id, _charged)
+        raise
 
     # 架构改造：直接返回 base64 data URL，不再落盘
     buf = io.BytesIO()
@@ -1910,12 +1925,19 @@ async def panorama_ai_correct(request: Request, data: dict):
 
         if result.get("success") and result.get("images"):
             img_path = result["images"][0]["path"]
-            # 读取修正后的图，调整回 2:1 全景比例
-            corrected = Image.open(img_path).convert("RGB")
-            corrected = corrected.resize((2048, 1024), Image.LANCZOS)
-            buf = io.BytesIO()
-            corrected.save(buf, "PNG")
-            out_bytes = buf.getvalue()
+            try:
+                # 读取修正后的图，调整回 2:1 全景比例
+                corrected = Image.open(img_path).convert("RGB")
+                corrected = corrected.resize((2048, 1024), Image.LANCZOS)
+                buf = io.BytesIO()
+                corrected.save(buf, "PNG")
+                out_bytes = buf.getvalue()
+            finally:
+                # 清理 image_service 临时文件（与 ai_generate/generate_faces 一致）
+                try:
+                    os.unlink(img_path)
+                except OSError:
+                    pass
             # 架构改造：直接返回 base64 data URL，不再落盘
             pano_id = f"pano_{uuid.uuid4().hex[:12]}"
             # 历史写入数据库（只存 ID）

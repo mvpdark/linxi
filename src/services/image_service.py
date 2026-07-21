@@ -5,6 +5,7 @@ import base64
 import logging
 import os
 import time
+import uuid
 from pathlib import Path
 from typing import Optional
 
@@ -259,7 +260,7 @@ class ImageService:
             images = []
             for item in data.get("data", []):
                 timestamp = int(time.time() * 1000)
-                filename = f"{prefix}_{timestamp}_{len(images)}.{fmt}"
+                filename = f"{prefix}_{timestamp}_{len(images)}_{uuid.uuid4().hex[:6]}.{fmt}"
                 filepath = os.path.join(output_dir, filename)
 
                 if "b64_json" in item:

@@ -117,8 +117,8 @@ actual class LocalMessageStore actual constructor(context: PlatformContext) {
             try {
                 tmpFile.writeBytes(bytes)
                 if (!tmpFile.renameTo(file)) {
-                    // 个别 ROM rename 失败时退化为直接写入
-                    file.writeBytes(bytes)
+                    // 个别 ROM rename 失败时退化为拷贝（与 Desktop 端一致，从已写好的 tmp 文件拷贝）
+                    tmpFile.copyTo(file, overwrite = true)
                 }
             } finally {
                 if (tmpFile.exists()) tmpFile.delete()
