@@ -89,7 +89,7 @@ import kotlin.concurrent.thread
  *
  * 线程模型：
  * - 文件准备 + JCEF 初始化：Dispatchers.IO（原生库提取为 IO 密集型）
- * - CefBrowser 创建：SwingPanel factory（Desktop 上即 AWT EDT）
+ * - CefBrowser 创建：LaunchedEffect（EDT），SwingPanel 仅包裹其 UI 组件
  * - CefLoadHandler 回调在 CEF 线程触发，写 Compose snapshot state 线程安全
  *
  * 原生库分发：
@@ -155,7 +155,11 @@ actual fun PanoramaViewer(
             }
             // JCEF 全局只需初始化一次；build() 线程安全且幂等（返回同一实例）。
             // 失败会抛异常 → 走 catch 降级
-            withContext(Dispatchers.IO) { ensureJcefInitialized() }
+            // JCEF 初始化（首次需提取原生库）设 120s 超时：防止原生库提取卡住
+            // 导致看门狗（25s）超时后误判为 WebGL 不支持
+            withTimeout(120_000) {
+                withContext(Dispatchers.IO) { ensureJcefInitialized() }
+            }
             jcefReady = true
         } catch (e: Throwable) {
             PlatformLogger.e("PanoramaViewer", "Embedded JCEF unavailable, fallback to system browser", e)
@@ -229,6 +233,13 @@ actual fun PanoramaViewer(
                     persistent: Boolean,
                     callback: CefQueryCallback?,
                 ): Boolean {
+                    // 旧浏览器的回调可能在新浏览器创建后仍触发（close/dispose 异步），
+                    // 校验传入 browser 是否仍为当前活跃浏览器，避免覆盖新状态
+                    val active = cefBrowser
+                    if (browser != null && active != null && browser !== active) {
+                        callback?.success("")
+                        return true
+                    }
                     when (request) {
                         "loaded" -> {
                             // Pannellum load 事件 = 纹理上传完成，真正可交互
@@ -301,6 +312,10 @@ actual fun PanoramaViewer(
                 ) {
                     // 仅处理主帧错误，忽略子资源错误（如图片加载失败由 Pannellum loadError 处理）
                     if (frame?.isMain == true) {
+                        // 旧浏览器的 ERR_ABORTED 等回调可能在新浏览器创建后仍触发，
+                        // 校验 browser 是否仍为当前活跃浏览器
+                        val active = cefBrowser
+                        if (browser != null && active != null && browser !== active) return
                         status = PanoramaStatus.Error
                         error = "全景图页面加载失败: ${errorText ?: errorCode?.toString() ?: "未知错误"}"
                     }
@@ -330,6 +345,12 @@ actual fun PanoramaViewer(
             if (isActive && status == PanoramaStatus.Loading) {
                 status = PanoramaStatus.Error
                 error = "全景加载超时，请检查设备是否支持 WebGL"
+                // 关闭超时的浏览器：否则 WebGL 渲染空转 + 文件句柄占用
+                // 导致临时目录无法删除
+                cefBrowser?.let { runCatching { it.close(true) } }
+                cefClient?.let { runCatching { it.dispose() } }
+                cefBrowser = null
+                cefClient = null
             }
         }
     }

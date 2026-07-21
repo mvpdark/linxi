@@ -49,7 +49,11 @@ class PanoramaJsBridge(
     private val onError: (String) -> Unit,
 ) {
     @JavascriptInterface
-    fun log(msg: String) = Log.d("PanoramaJS", msg)
+    fun log(msg: String) {
+        // Pannellum 错误信息可能含完整 data URL（多 MB），截断避免 logcat 爆炸
+        val truncated = if (msg.length > 200) msg.substring(0, 200) + "...(${msg.length} chars)" else msg
+        Log.d("PanoramaJS", truncated)
+    }
 
     @JavascriptInterface
     fun onPanoramaLoaded() = onRendered()
@@ -254,9 +258,12 @@ actual fun PanoramaViewer(
 
             webChromeClient = object : WebChromeClient() {
                 override fun onConsoleMessage(consoleMessage: ConsoleMessage): Boolean {
+                    // consoleMessage.message() 可能含完整 data URL（多 MB），截断避免 logcat 爆炸
+                    val msg = consoleMessage.message()
+                    val truncated = if (msg.length > 200) msg.substring(0, 200) + "...(${msg.length} chars)" else msg
                     Log.d(
                         "PanoramaJS",
-                        "[${consoleMessage.messageLevel()}] ${consoleMessage.message()} (${consoleMessage.sourceId()}:${consoleMessage.lineNumber()})"
+                        "[${consoleMessage.messageLevel()}] $truncated (${consoleMessage.sourceId()}:${consoleMessage.lineNumber()})"
                     )
                     return true
                 }
@@ -299,7 +306,9 @@ actual fun PanoramaViewer(
     DisposableEffect(Unit) {
         onDispose {
             webViewDestroyed.set(true)
-            // 销毁 WebView 前先调用 JS 清理，避免 Pannellum 的 WebGL 上下文泄漏
+            // 先加载空白页停止所有进行中的加载/定时器，再执行 JS 清理 + destroy，
+            // 避免 Pannellum 的 WebGL 上下文泄漏及 destroy 时的回调崩溃
+            try { webView.loadUrl("about:blank") } catch (_: Exception) { }
             try {
                 webView.evaluateJavascript("if(typeof __destroyPanorama==='function') __destroyPanorama();", null)
             } catch (_: Exception) { }

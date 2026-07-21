@@ -50,6 +50,7 @@ class ImageService:
         n: int = 1,
         output_format: str = "png",
         timeout: int = 600,
+        max_attempts: Optional[int] = None,
     ) -> dict:
         """文生图：根据文本提示生成图片。
 
@@ -63,6 +64,7 @@ class ImageService:
             n: 生成数量，默认1
             output_format: 输出图片格式，默认 png
             timeout: 请求超时时间（秒），默认600
+            max_attempts: 最大尝试次数（默认 None 表示按 KeyPool 冷却策略，至多 3 次）
 
         返回:
             包含 success, images, raw 字段的结果字典
@@ -82,7 +84,11 @@ class ImageService:
         # 下一轮自动切换到其他可用 key（与 llm_service 重试模式一致）
         last_error = None
         data = None
-        for _ in range(self._cooldown_attempts()):
+        # 调用方可收紧尝试次数以控制端到端最坏耗时（如全景链路须小于客户端 600s 超时）
+        attempts = self._cooldown_attempts()
+        if max_attempts is not None:
+            attempts = max(1, min(max_attempts, attempts))
+        for _ in range(attempts):
             key = self.key_pool.get_next_key()
             headers = {
                 "Authorization": f"Bearer {key}",
@@ -133,6 +139,7 @@ class ImageService:
         output_format: str = "png",
         mask_path: Optional[str] = None,
         timeout: int = 600,
+        max_attempts: Optional[int] = None,
     ) -> dict:
         """图生图：基于原图和提示词编辑图片。
 
@@ -149,6 +156,7 @@ class ImageService:
             output_format: 输出图片格式，默认 png
             mask_path: 蒙版图片路径（可选）
             timeout: 请求超时时间（秒），默认600
+            max_attempts: 最大尝试次数（默认 None 表示按 KeyPool 冷却策略，至多 3 次）
 
         返回:
             包含 success, images, raw 字段的结果字典
@@ -185,7 +193,11 @@ class ImageService:
         # 下一轮自动切换到其他可用 key（与 llm_service 重试模式一致）
         last_error = None
         data = None
-        for _ in range(self._cooldown_attempts()):
+        # 调用方可收紧尝试次数以控制端到端最坏耗时（如全景链路须小于客户端 600s 超时）
+        attempts = self._cooldown_attempts()
+        if max_attempts is not None:
+            attempts = max(1, min(max_attempts, attempts))
+        for _ in range(attempts):
             key = self.key_pool.get_next_key()
             headers = {"Authorization": f"Bearer {key}"}
             try:

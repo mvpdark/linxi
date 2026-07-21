@@ -17,7 +17,7 @@ import java.security.MessageDigest
  * Android 平台 LocalMessageStore：基于应用内部存储目录 + JSON 文件。
  *
  * - 消息存储：`context.filesDir/messages/{sessionId}.json`
- * - 图片存储：`context.filesDir/images/{md5(url)}.jpg`
+ * - 图片存储：`context.filesDir/images/{md5(url)}.{png|jpg|webp}`（扩展名按魔数嗅探）
  *
  * 文件读写通过 [Mutex] 保证线程安全，IO 操作切换到 [Dispatchers.IO]。
  *
@@ -41,7 +41,18 @@ actual class LocalMessageStore actual constructor(context: PlatformContext) {
     private val messagesDir: File get() = File(ctx.filesDir, "messages").apply { mkdirs() }
     private val imagesDir: File get() = File(ctx.filesDir, "images").apply { mkdirs() }
 
-    private fun messageFile(sessionId: String): File = File(messagesDir, "$sessionId.json")
+    private fun messageFile(sessionId: String): File =
+        File(messagesDir, "${sanitizeSessionId(sessionId)}.json")
+
+    /**
+     * 清洗 sessionId 中的路径不安全字符，防止服务端下发的会话 ID 含
+     * `../`、路径分隔符等导致文件被写到 messages 目录之外（路径穿越）。
+     * 与 Desktop 端实现保持一致。
+     */
+    private fun sanitizeSessionId(sessionId: String): String {
+        val cleaned = sessionId.replace(Regex("[^A-Za-z0-9_\\-]"), "_")
+        return cleaned.ifBlank { "unknown_session" }
+    }
 
     actual suspend fun saveMessage(sessionId: String, message: ChatMessage) {
         mutex.withLock {
@@ -96,11 +107,13 @@ actual class LocalMessageStore actual constructor(context: PlatformContext) {
 
     actual suspend fun saveImage(url: String, bytes: ByteArray): String {
         return withContext(Dispatchers.IO) {
-            val fileName = "${md5(url)}.jpg"
+            val ext = sniffImageExtension(bytes)
+            val fileName = "${md5(url)}.$ext"
             val file = File(imagesDir, fileName)
             // 先写临时文件再原子重命名：避免并发写同一 URL 的图片时字节交错
-            // 产生截断文件，也避免崩溃留下半截图片（saveImage 不在 mutex 内）
-            val tmpFile = File(imagesDir, "$fileName.tmp")
+            // 产生截断文件，也避免崩溃留下半截图片（saveImage 不在 mutex 内）。
+            // tmp 文件名加 nanoTime 后缀：并发写同一 URL 时避免两个 tmp 互相覆盖
+            val tmpFile = File(imagesDir, "$fileName.tmp.${System.nanoTime()}")
             try {
                 tmpFile.writeBytes(bytes)
                 if (!tmpFile.renameTo(file)) {

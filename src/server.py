@@ -1715,7 +1715,8 @@ async def panorama_generate_faces(
                 size="1024x1024",
                 quality="high",
                 output_format="png",
-                timeout=600,
+                timeout=270,
+                max_attempts=2,
             )
         except Exception as ex:
             logger.error("generate-faces 生成 %s 面异常: %s", name, ex)
@@ -1797,12 +1798,15 @@ async def panorama_ai_generate(
     )
 
     # 先用 1536x1024 生成（API 支持的最大 2:1 比例），再 resize 到 2048x1024
+    # 超时预算：客户端超时 600s，单次 270s × 至多 2 次尝试 = 最坏 540s，
+    # 预留 60s 给读图/压缩/resize/base64，确保成功结果能在客户端放弃前返回
     result = await image_service.generate_image(
         prompt=pano_prompt,
         size="1536x1024",
         quality="high",
         output_format="png",
-        timeout=600,
+        timeout=270,
+        max_attempts=2,
     )
 
     if not result.get("success") or not result.get("images"):
@@ -1894,6 +1898,8 @@ async def panorama_ai_correct(request: Request, data: dict):
                 size="1024x1024",
                 quality="high",
                 output_format="png",
+                timeout=270,
+                max_attempts=2,
             )
         finally:
             # 清理临时文件（成功/异常均执行）
