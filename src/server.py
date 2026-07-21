@@ -2050,14 +2050,14 @@ app.add_middleware(_LegacyUrlRedirect)
 
 def _get_lan_ip() -> str:
     """获取局域网 IP。"""
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s.connect(("8.8.8.8", 80))
-        ip = s.getsockname()[0]
-        s.close()
-        return ip
+        return s.getsockname()[0]
     except Exception:
         return "0.0.0.0"
+    finally:
+        s.close()
 
 
 if __name__ == "__main__":

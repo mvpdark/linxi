@@ -106,6 +106,7 @@ class PanoramaViewModel(
                             step = Step.Result,
                             resultUrl = persistedUrl,
                             isGenerating = false,
+                            originalBytes = null, // 释放原始图片字节，减少内存占用
                         )
                     }
                 } else {

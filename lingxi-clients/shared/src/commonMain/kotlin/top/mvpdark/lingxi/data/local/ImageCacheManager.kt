@@ -109,7 +109,9 @@ class ImageCacheManager(
         } catch (e: Exception) {
             // 下载或保存失败时返回原始 URL，保证消息内容不丢失；
             // 记录日志便于排查（否则坏 URL 静默回退，无法定位根因）
-            PlatformLogger.e("ImageCacheManager", "图片缓存失败，回退原始 URL: $url", e)
+            // 截断 URL 防止 data URL（多 MB base64）写入日志导致膨胀和泄漏
+            val safeUrl = if (url.length > 200) url.take(200) + "...(${url.length} chars)" else url
+            PlatformLogger.e("ImageCacheManager", "图片缓存失败，回退原始 URL: $safeUrl", e)
             url
         }
     }

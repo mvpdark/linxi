@@ -134,6 +134,14 @@ actual class LocalMessageStore actual constructor(context: PlatformContext) {
             // 兼容 file:///C:/... （三斜杠）和 file://C:/... （两斜杠）
             val path = localPath.removePrefix("file:///").removePrefix("file://")
             val file = File(path)
+            // 路径穿越防护：仅允许读取 imagesDir 内的文件
+            try {
+                val allowedDir = imagesDir.canonicalPath + File.separator
+                val targetPath = file.canonicalPath
+                if (!targetPath.startsWith(allowedDir)) return@withContext null
+            } catch (e: java.io.IOException) {
+                return@withContext null
+            }
             if (file.exists()) file.readBytes() else null
         }
     }

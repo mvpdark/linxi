@@ -833,7 +833,8 @@ private suspend fun readImageBytes(imageUrl: String): ByteArray {
                 try {
                     File(imageUrl).readBytes()
                 } catch (e: Exception) {
-                    throw IllegalArgumentException("无法识别的图片URL格式: $imageUrl", e)
+                    // 截断 URL 防止 data URL（多 MB base64）写入异常消息和日志
+                    throw IllegalArgumentException("无法识别的图片URL格式: ${imageUrl.take(100)}", e)
                 }
             }
         }
